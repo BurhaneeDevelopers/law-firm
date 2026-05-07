@@ -4,7 +4,7 @@ import { Watermark } from "@/components/layout/watermark"
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[var(--background)] transition-colors">
+    <div className="min-h-screen bg-gray-50 transition-colors">
       <Sidebar />
       <div className="md:pl-[260px] transition-all duration-300">
         <Header />
