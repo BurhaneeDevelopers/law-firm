@@ -47,7 +47,7 @@ export function Header() {
       <header className="sticky top-0 z-30 bg-white/80 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-100 dark:border-slate-700 h-14 flex items-center px-4 gap-4">
         {/* Breadcrumb */}
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          <span className="text-xs text-slate-400 dark:text-slate-400">LexFirm</span>
+          <span className="text-xs text-slate-400 dark:text-slate-400">VakilOS</span>
           {segments.map((seg, i) => (
             <span key={seg} className="flex items-center gap-1.5">
               <ChevronRight className="w-3 h-3 text-slate-300" />

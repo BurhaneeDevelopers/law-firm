@@ -4,7 +4,7 @@ import { ToastProvider } from "@/components/ui/toast"
 import { Providers } from "./providers"
 
 export const metadata: Metadata = {
-  title: "LexFirm — Law Practice Management",
+  title: "VakilOS — Law Practice Management",
   description: "Professional law firm management system for Indian advocates",
 }
 

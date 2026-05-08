@@ -2,7 +2,7 @@
 export const demoLawyer = {
   id: "lawyer-1",
   name: "Mahipal Yadav",
-  email: "mahipal.yadav@lexfirm.in",
+  email: "mahipal.yadav@VakilOS.in",
   phone: "+91 98765 43210",
   bar_council_no: "D/3452/2014",
   enrollment_no: "HR/123/2014",

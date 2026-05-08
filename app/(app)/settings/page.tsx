@@ -8,9 +8,9 @@ import { useToast } from "@/components/ui/toast"
 const TABS = ["Profile", "Firm", "Notifications", "Team", "Appearance"]
 
 const teamMembers = [
-  { id: 1, name: "Rahul Yadav", email: "rahul.yadav@lexfirm.in", role: "Junior Advocate", status: "Active" },
-  { id: 2, name: "Priya Sharma", email: "priya.sharma@lexfirm.in", role: "Office Staff", status: "Active" },
-  { id: 3, name: "Vikash Kumar", email: "vikash.kumar@lexfirm.in", role: "Junior Advocate", status: "Invited" },
+  { id: 1, name: "Rahul Yadav", email: "rahul.yadav@VakilOS.in", role: "Junior Advocate", status: "Active" },
+  { id: 2, name: "Priya Sharma", email: "priya.sharma@VakilOS.in", role: "Office Staff", status: "Active" },
+  { id: 3, name: "Vikash Kumar", email: "vikash.kumar@VakilOS.in", role: "Junior Advocate", status: "Invited" },
 ]
 
 export default function SettingsPage() {
