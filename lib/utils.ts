@@ -44,33 +44,33 @@ export function getCountdownLabel(daysUntil: number) {
 }
 
 export const caseTypeColors: Record<string, string> = {
-  Criminal: "bg-rose-100 text-rose-700 border border-rose-200",
-  Divorce: "bg-purple-100 text-purple-700 border border-purple-200",
-  Property: "bg-amber-100 text-amber-700 border border-amber-200",
-  Civil: "bg-blue-100 text-blue-700 border border-blue-200",
+  Criminal: "bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-800",
+  Divorce: "bg-purple-100 text-purple-700 border border-purple-200 dark:bg-purple-950 dark:text-purple-300 dark:border-purple-800",
+  Property: "bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800",
+  Civil: "bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800",
 }
 
 export const caseTypeDotColors: Record<string, string> = {
-  Criminal: "bg-rose-500",
-  Divorce: "bg-purple-500",
-  Property: "bg-amber-500",
-  Civil: "bg-blue-500",
+  Criminal: "bg-rose-500 dark:bg-rose-400",
+  Divorce: "bg-purple-500 dark:bg-purple-400",
+  Property: "bg-amber-500 dark:bg-amber-400",
+  Civil: "bg-blue-500 dark:bg-blue-400",
 }
 
 export const statusColors: Record<string, string> = {
-  Active: "bg-indigo-50 text-indigo-700 border border-indigo-200",
-  "Hearing Scheduled": "bg-amber-50 text-amber-700 border border-amber-200",
-  "Judgment Awaited": "bg-orange-50 text-orange-700 border border-orange-200",
-  Closed: "bg-slate-100 text-slate-600 border border-slate-200",
-  Won: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  Active: "bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800",
+  "Hearing Scheduled": "bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800",
+  "Judgment Awaited": "bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-800",
+  Closed: "bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700",
+  Won: "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800",
 }
 
 export const statusDotColors: Record<string, string> = {
-  Active: "bg-indigo-500",
-  "Hearing Scheduled": "bg-amber-500",
-  "Judgment Awaited": "bg-orange-500",
-  Closed: "bg-slate-400",
-  Won: "bg-emerald-500",
+  Active: "bg-indigo-500 dark:bg-indigo-400",
+  "Hearing Scheduled": "bg-amber-500 dark:bg-amber-400",
+  "Judgment Awaited": "bg-orange-500 dark:bg-orange-400",
+  Closed: "bg-slate-400 dark:bg-slate-500",
+  Won: "bg-emerald-500 dark:bg-emerald-400",
 }
 
 export function getInitials(name: string) {

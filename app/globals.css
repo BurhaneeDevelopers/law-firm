@@ -2,14 +2,20 @@
 @import "tailwindcss";
 
 :root {
-  --background: #F8FAFC;
+  --background: #FFFFFF;
   --foreground: #0F172A;
-  --primary: #3730A3;
-  --primary-light: #4338CA;
+  --primary: #4F46E5;
+  --primary-light: #6366F1;
   --primary-subtle: #EEF2FF;
   --accent: #F59E0B;
   --card: #FFFFFF;
-  --border: #E2E8F0;
+  --border: #E5E7EB;
+  --muted: #F9FAFB;
+  --muted-foreground: #6B7280;
+  --secondary: #F3F4F6;
+  --secondary-foreground: #111827;
+  --card-hover: rgba(0, 0, 0, 0.02);
+  --radius: 12px;
 }
 
 .dark {
@@ -21,17 +27,23 @@
   --accent: #FBBF24;
   --card: #0F172A;
   --border: #334155;
+  --muted: #1E293B;
+  --muted-foreground: #94A3B8;
+  --secondary: #1E293B;
+  --secondary-foreground: #F1F5F9;
+  --card-hover: rgba(255, 255, 255, 0.05);
 }
 
 * { box-sizing: border-box; }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: #F9FAFB;
+  color: #111827;
   font-family: 'DM Sans', sans-serif;
   font-size: 15px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -83,22 +95,23 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .card-hover {
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 .card-hover:hover {
-  box-shadow: 0 4px 20px rgba(0,0,0,0.12);
-  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+  transform: translateY(-2px);
 }
 
 .sidebar-glass {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  background: color-mix(in srgb, var(--card) 90%, transparent);
-  border-right: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: rgba(255, 255, 255, 0.95);
+  border-right: 1px solid rgba(229, 231, 235, 0.8);
 }
 
 .table-row-hover { transition: background 0.15s; }
-.table-row-hover:hover { background: #F8FAFC; }
+.table-row-hover:hover { background: var(--muted); }
 
 .chat-ai {
   background: color-mix(in srgb, var(--background) 92%, var(--card));
@@ -111,6 +124,11 @@ h1, h2, h3, h4, h5, h6 {
   border-radius: 16px 16px 4px 16px;
 }
 
+.dark .chat-ai {
+  background: var(--muted);
+  border: 1px solid var(--border);
+}
+
 .notice-paper {
   background: var(--card);
   box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 8px 32px rgba(0,0,0,0.08);
@@ -121,9 +139,23 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: 0 1px 3px rgba(0,0,0,0.35), 0 8px 28px rgba(0,0,0,0.4);
 }
 
+.dark .skeleton {
+  background: linear-gradient(90deg, #1E293B 25%, #334155 50%, #1E293B 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.dark .card-hover:hover {
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+
 .countdown-danger { background: #FFF1F2; color: #F43F5E; border: 1px solid #FECDD3; }
 .countdown-warning { background: #FFFBEB; color: #D97706; border: 1px solid #FDE68A; }
 .countdown-safe { background: #F0FDF4; color: #059669; border: 1px solid #A7F3D0; }
+
+.dark .countdown-danger { background: #4C0519; color: #FDA4AF; border: 1px solid #881337; }
+.dark .countdown-warning { background: #451A03; color: #FCD34D; border: 1px solid #78350F; }
+.dark .countdown-safe { background: #022C22; color: #6EE7B7; border: 1px solid #065F46; }
 
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }

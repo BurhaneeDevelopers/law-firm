@@ -14,22 +14,53 @@ const ThemeContext = createContext<ThemeContextValue | undefined>(undefined)
 function applyTheme(theme: Theme) {
   if (typeof document === "undefined") return
   const root = document.documentElement
-  root.classList.toggle("dark", theme === "dark")
+  
+  if (theme === "dark") {
+    root.classList.add("dark")
+  } else {
+    root.classList.remove("dark")
+  }
+  
   root.setAttribute("data-theme", theme)
 }
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === "undefined") return "light"
-    return localStorage.getItem("theme") === "dark" ? "dark" : "light"
-  })
+function getInitialTheme(): Theme {
+  if (typeof window === "undefined") return "light"
+  
+  // Check localStorage first
+  const stored = localStorage.getItem("theme")
+  if (stored === "dark" || stored === "light") {
+    return stored
+  }
+  
+  // Fall back to system preference
+  if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    return "dark"
+  }
+  
+  return "light"
+}
 
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setTheme] = useState<Theme>("light")
+  const [mounted, setMounted] = useState(false)
+
+  // Initialize theme on mount
   useEffect(() => {
+    const initialTheme = getInitialTheme()
+    setTheme(initialTheme)
+    applyTheme(initialTheme)
+    setMounted(true)
+  }, [])
+
+  // Apply theme changes
+  useEffect(() => {
+    if (!mounted) return
     applyTheme(theme)
     if (typeof window !== "undefined") {
       localStorage.setItem("theme", theme)
     }
-  }, [theme])
+  }, [theme, mounted])
 
   const value = useMemo(
     () => ({
@@ -39,6 +70,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     [theme]
   )
 
+  // Always provide context, even before mount
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }
 
