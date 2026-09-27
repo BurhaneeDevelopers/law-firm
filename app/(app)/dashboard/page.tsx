@@ -88,7 +88,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`${greeting()}, Adv. ${db.lawyer.name.split(" ")[0]}`}
+        title={`${greeting()}, Adv. ${db.lawyer.name}`}
         description={summary}
         actions={
           <>
