@@ -1,264 +1,307 @@
 "use client"
-import { useState, use } from "react"
-import { useRouter } from "next/navigation"
+import { use, useState } from "react"
 import Link from "next/link"
-import { ArrowLeft, Phone, MessageSquare, Sparkles, ChevronRight, Edit2, Save, X, AlertCircle } from "lucide-react"
-import { cn, getInitials, getAvatarColor, caseTypeColors, statusColors, formatDate, formatRelativeTime } from "@/lib/utils"
-import { getClient, getCases, getDocuments, updateClient } from "@/lib/store"
-import { callGemini } from "@/lib/gemini"
+import { Briefcase, Copy, FileText, MessageSquareText, Pencil, Phone, Plus, Save, Sparkles, Users } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Card, CardHeader, DetailRow } from "@/components/ui/card"
+import { Badge, CaseTypeTag, StatusBadge } from "@/components/ui/badge"
+import { Field, Input, Select, Textarea } from "@/components/ui/field"
+import { Avatar, EmptyState, PageHeader, Segmented } from "@/components/ui/misc"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Dialog, SheetContent } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/toast"
+import { WhatsAppMenu } from "@/components/practice/whatsapp-menu"
+import { AIText } from "@/components/practice/ai-text"
+import { ID_PROOF_TYPES, LANGUAGES, OPEN_STATUSES } from "@/lib/constants"
+import { formatDate, formatINR, formatRelativeTime, getRelativeDayLabel, maskId } from "@/lib/utils"
+import { addCommLog, getCaseFees, getClientFees, getNextHearing, uid, updateClient, useDB, type Client } from "@/lib/store"
+import { callGemini } from "@/lib/gemini"
 
-const TABS = ["Profile", "Cases", "Documents", "Communication Log", "AI Brief"]
+const CHANNELS = ["Call", "WhatsApp", "Meeting", "Email"] as const
 
 export default function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const router = useRouter()
+  const db = useDB()
   const { toast } = useToast()
-  const [activeTab, setActiveTab] = useState("Profile")
-  const [editMode, setEditMode] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [log, setLog] = useState({ channel: "Call" as (typeof CHANNELS)[number], summary: "" })
+  const [showId, setShowId] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiBrief, setAiBrief] = useState("")
 
-  const client = getClient(id)
-  const [formData, setFormData] = useState(client || {})
-
+  const client = db.clients.find((c) => c.id === id)
   if (!client) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <AlertCircle className="w-12 h-12 text-slate-300 mb-4" />
-        <h2 className="text-lg font-semibold text-slate-700">Client Not Found</h2>
-        <Link href="/clients" className="mt-4 text-sm text-indigo-600 font-medium">← Back to Clients</Link>
-      </div>
+      <EmptyState
+        icon={Users}
+        title="Client not found"
+        description="The record may have been removed."
+        action={<Button asChild variant="outline"><Link href="/clients">Back to clients</Link></Button>}
+      />
     )
   }
 
-  const allCases = getCases().filter(c => c.client_id === id)
-  const allDocs = getDocuments().filter(d => allCases.some(c => c.id === d.case_id))
+  const cases = db.cases.filter((c) => c.client_id === id)
+  const openCases = cases.filter((c) => OPEN_STATUSES.includes(c.status))
+  const docs = db.documents.filter((d) => cases.some((c) => c.id === d.case_id))
+  const logs = db.commLogs.filter((l) => l.client_id === id).sort((a, b) => b.created_at.localeCompare(a.created_at))
+  const fees = getClientFees(id, db)
 
-  const handleSave = () => {
-    updateClient(id, formData as any)
-    toast("Client updated", "success")
-    setEditMode(false)
+  const saveLog = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!log.summary.trim()) return
+    addCommLog({ id: uid("cl"), client_id: id, channel: log.channel, summary: log.summary.trim(), created_at: new Date().toISOString() })
+    setLog((l) => ({ ...l, summary: "" }))
+    toast("Logged", "success")
   }
 
   const handleAIBrief = async () => {
     setAiLoading(true)
-    const casesSummary = allCases.map(c => `${c.case_number}: ${c.title} (${c.status})`).join(", ")
-    const prompt = `Generate a brief client profile for a lawyer's meeting preparation:
-Client: ${client.full_name}
-Phone: ${client.phone}
-Address: ${client.address}
-ID Proof: ${client.id_proof_type} - ${client.id_proof_number}
-Notes: ${client.notes}
-Cases: ${casesSummary || "No cases"}
-Added: ${client.created_at}
+    const prompt = `Prepare a short meeting brief for Advocate ${db.lawyer.name} about this client:
+Client: ${client.full_name}, ${client.city}. Preferred language: ${client.preferred_language}.
+Notes: ${client.notes || "none"}
+Cases: ${cases.map((c) => `${c.case_number} ${c.title} (${c.status})`).join("; ") || "none"}
+Fees: agreed ${fees.agreed}, received ${fees.received}, balance ${fees.balance}
+Recent communication: ${logs.slice(0, 3).map((l) => `${l.channel}: ${l.summary}`).join("; ") || "none"}
 
-Generate a concise professional brief paragraph about this client — who they are, case history overview, current status, and what to keep in mind before meeting.`
+Cover: who they are, matters and their stage, what to discuss, anything sensitive.`
     const result = await callGemini(prompt)
     setAiBrief(result)
     setAiLoading(false)
   }
 
   return (
-    <div className="max-w-5xl mx-auto animate-fade-in">
-      <div className="flex items-center gap-2 mb-6">
-        <button onClick={() => router.back()} className="p-2 rounded-xl hover:bg-slate-100 text-slate-500">
-          <ArrowLeft className="w-4 h-4" />
-        </button>
-        <span className="text-xs text-slate-400">Clients</span>
-        <ChevronRight className="w-3 h-3 text-slate-300" />
-        <span className="text-xs text-slate-500">{client.full_name}</span>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        back={{ href: "/clients", label: "Clients" }}
+        title={
+          <span className="flex items-center gap-3">
+            <Avatar name={client.full_name} size="md" />
+            {client.full_name}
+          </span>
+        }
+        description={`${client.phone}${client.city ? ` · ${client.city}` : ""} · Client since ${formatDate(client.created_at, "MMM yyyy")}`}
+        actions={
+          <>
+            <Button asChild variant="outline"><a href={`tel:${client.phone.replace(/\s/g, "")}`}><Phone /> Call</a></Button>
+            <WhatsAppMenu
+              size="md"
+              phone={client.phone}
+              preferred={client.preferred_language}
+              message={(lang) => (lang === "Hindi" ? `नमस्ते ${client.full_name} जी,\n\n` : `Dear ${client.full_name},\n\n`)}
+            />
+            <Button variant="outline" onClick={() => setEditOpen(true)}><Pencil /> Edit</Button>
+          </>
+        }
+      />
 
-      {/* Client Header */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 mb-5">
-        <div className="flex items-start gap-4 justify-between">
-          <div className="flex items-center gap-4">
-            <div className={cn("w-16 h-16 rounded-2xl flex items-center justify-center text-white font-bold text-xl", getAvatarColor(client.full_name))}>
-              {getInitials(client.full_name)}
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-slate-900">{client.full_name}</h1>
-              <p className="text-sm text-slate-500">{client.phone}</p>
-              {client.email && <p className="text-xs text-slate-400">{client.email}</p>}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <a href={`tel:${client.phone}`} className="flex items-center gap-2 px-3 py-2 bg-slate-100 text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-200 transition-colors">
-              <Phone className="w-4 h-4" /> Call
-            </a>
-            <a href={`https://wa.me/${client.phone.replace(/\D/g, "")}`} target="_blank" className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm font-medium rounded-xl hover:bg-emerald-700 transition-colors">
-              <MessageSquare className="w-4 h-4" /> WhatsApp
-            </a>
-          </div>
-        </div>
-        <div className="flex gap-4 mt-4">
-          <span className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full font-medium">{allCases.length} Cases</span>
-          <span className="text-xs bg-amber-50 text-amber-700 px-3 py-1 rounded-full font-medium">{allDocs.length} Documents</span>
-          <span className="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded-full font-medium">Since {formatDate(client.created_at, "MMM yyyy")}</span>
-        </div>
-      </div>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <Card className="min-w-0 overflow-hidden">
+          <Tabs defaultValue="cases">
+            <TabsList>
+              <TabsTrigger value="cases" count={cases.length}>Cases</TabsTrigger>
+              <TabsTrigger value="log" count={logs.length}>Communication</TabsTrigger>
+              <TabsTrigger value="documents" count={docs.length}>Documents</TabsTrigger>
+              <TabsTrigger value="ai"><Sparkles className="size-3.5" /> Meeting brief</TabsTrigger>
+            </TabsList>
 
-      {/* Tabs */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="flex overflow-x-auto border-b border-slate-100 px-2">
-          {TABS.map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={cn("px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors border-b-2",
-                activeTab === tab ? "text-indigo-700 border-indigo-700" : "text-slate-500 hover:text-slate-700 border-transparent")}>
-              {tab}
-            </button>
-          ))}
-        </div>
-
-        <div className="p-6">
-          {/* Profile */}
-          {activeTab === "Profile" && (
-            <div className="space-y-4">
-              <div className="flex justify-end">
-                {editMode ? (
-                  <div className="flex gap-2">
-                    <button onClick={handleSave} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 text-sm font-medium rounded-lg hover:bg-emerald-100">
-                      <Save className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => setEditMode(false)} className="px-3 py-1.5 bg-slate-100 text-slate-600 text-sm rounded-lg hover:bg-slate-200">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <button onClick={() => setEditMode(true)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                )}
+            <TabsContent value="cases" className="p-5">
+              <div className="mb-4 flex justify-end">
+                <Button asChild size="sm"><Link href={`/cases/new?client=${id}`}><Plus /> New case</Link></Button>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  { label: "Full Name", key: "full_name" },
-                  { label: "Phone", key: "phone" },
-                  { label: "Email", key: "email" },
-                  { label: "Address", key: "address" },
-                  { label: "ID Proof Type", key: "id_proof_type" },
-                  { label: "ID Number", key: "id_proof_number" },
-                  { label: "Referred By", key: "referred_by" },
-                ].map(f => (
-                  <div key={f.key} className={f.key === "address" || f.key === "notes" ? "col-span-2" : ""}>
-                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">{f.label}</p>
-                    {editMode ? (
-                      <input value={(formData as any)[f.key] || ""} onChange={e => setFormData((d: any) => ({ ...d, [f.key]: e.target.value }))}
-                        className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400" />
-                    ) : (
-                      <p className="text-sm text-slate-800">{(client as any)[f.key] || "—"}</p>
-                    )}
-                  </div>
-                ))}
-                <div className="col-span-2">
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Notes</p>
-                  {editMode ? (
-                    <textarea value={(formData as any).notes || ""} onChange={e => setFormData((d: any) => ({ ...d, notes: e.target.value }))}
-                      rows={3} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 resize-none" />
-                  ) : (
-                    <p className="text-sm text-slate-700">{client.notes || "—"}</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Cases */}
-          {activeTab === "Cases" && (
-            <div className="space-y-3">
-              {allCases.length === 0 ? (
-                <div className="text-center py-8 text-slate-400">
-                  <p className="text-sm">No cases linked to this client</p>
-                  <Link href="/cases/new" className="text-xs text-indigo-600 font-medium mt-2 block">+ Create a case</Link>
-                </div>
-              ) : allCases.map(c => (
-                <Link key={c.id} href={`/cases/${c.id}`} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full", caseTypeColors[c.case_type])}>{c.case_type}</span>
-                      <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full", statusColors[c.status])}>{c.status}</span>
-                    </div>
-                    <p className="text-sm font-medium text-slate-900 line-clamp-1">{c.title}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">{c.case_number} · {c.court}</p>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-slate-300" />
-                </Link>
-              ))}
-            </div>
-          )}
-
-          {/* Documents */}
-          {activeTab === "Documents" && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {allDocs.length === 0 ? (
-                <div className="col-span-2 text-center py-8 text-slate-400 text-sm">No documents found</div>
-              ) : allDocs.map(d => (
-                <div key={d.id} className="flex items-start gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100 hover:bg-white hover:border-slate-200 transition-all">
-                  <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center flex-shrink-0 text-rose-600 text-sm font-bold">
-                    {d.file_type[0]}
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-slate-900 truncate max-w-[180px]">{d.filename}</p>
-                    <p className="text-[10px] text-slate-500">{d.doc_category}</p>
-                    <p className="text-[10px] text-slate-400">{formatDate(d.created_at)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Communication Log */}
-          {activeTab === "Communication Log" && (
-            <div className="space-y-3">
-              <div className="text-center py-4">
-                <p className="text-xs text-slate-400 mb-4">No WhatsApp messages or call logs yet. Manually log a communication below.</p>
-              </div>
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                <textarea rows={2} placeholder="Log a call or communication..."
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400 resize-none bg-white mb-2" />
-                <button className="px-4 py-2 bg-indigo-700 text-white text-xs font-medium rounded-lg hover:bg-indigo-800 transition-colors">
-                  Add Log
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* AI Brief */}
-          {activeTab === "AI Brief" && (
-            <div className="space-y-4">
-              {!aiBrief ? (
-                <div className="text-center py-8">
-                  <div className="w-14 h-14 rounded-2xl bg-indigo-100 flex items-center justify-center mx-auto mb-4">
-                    <Sparkles className="w-7 h-7 text-indigo-700" />
-                  </div>
-                  <h3 className="text-base font-semibold text-slate-900 mb-2">Client Brief</h3>
-                  <p className="text-sm text-slate-500 mb-6">Generate an AI summary of this client's history — useful before a client meeting.</p>
-                  <button onClick={handleAIBrief} disabled={aiLoading}
-                    className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-700 text-white font-medium rounded-xl hover:bg-indigo-800 transition-colors disabled:opacity-60">
-                    {aiLoading ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Generating...</> : <><Sparkles className="w-4 h-4" /> Generate Client Brief</>}
-                  </button>
-                </div>
+              {cases.length === 0 ? (
+                <EmptyState icon={Briefcase} title="No cases linked" description="Open a case to start tracking dates and fees for this client." />
               ) : (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-indigo-600" />
-                      <h3 className="text-sm font-semibold text-slate-900">Client Brief</h3>
-                    </div>
-                    <button onClick={() => setAiBrief("")} className="text-xs text-indigo-600 font-medium">Regenerate</button>
-                  </div>
-                  <div className="p-5 bg-indigo-50/50 rounded-xl border border-indigo-100">
-                    {aiBrief.split("\n").map((line, i) => (
-                      <p key={i} className="text-sm text-slate-700 leading-relaxed mb-2">{line.replace(/\*\*/g, "")}</p>
-                    ))}
+                <ul className="divide-y divide-border rounded-xl border border-border">
+                  {cases.map((c) => {
+                    const next = getNextHearing(c.id, db.hearings)
+                    const cf = getCaseFees(c.id, db)
+                    return (
+                      <li key={c.id}>
+                        <Link href={`/cases/${c.id}`} className="block px-4 py-3.5 transition-colors hover:bg-surface-2/60">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-xs text-muted-foreground">{c.case_number}</span>
+                            <CaseTypeTag type={c.case_type} />
+                            <StatusBadge status={c.status} className="ml-auto" />
+                          </div>
+                          <p className="mt-1 truncate text-sm font-medium text-foreground">{c.title}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {c.court}
+                            {next ? ` · Next ${getRelativeDayLabel(next.date)}` : ""}
+                            {cf.balance ? ` · ${formatINR(cf.balance)} due` : ""}
+                          </p>
+                        </Link>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </TabsContent>
+
+            <TabsContent value="log" className="space-y-4 p-5">
+              <form onSubmit={saveLog} className="space-y-2 rounded-xl border border-border p-3">
+                <Segmented
+                  size="sm"
+                  ariaLabel="Channel"
+                  value={log.channel}
+                  onChange={(v) => setLog((l) => ({ ...l, channel: v }))}
+                  options={CHANNELS.map((c) => ({ value: c, label: c }))}
+                />
+                <Textarea rows={2} value={log.summary} onChange={(e) => setLog((l) => ({ ...l, summary: e.target.value }))} placeholder="What was discussed or agreed" aria-label="Summary" />
+                <div className="flex justify-end">
+                  <Button type="submit" size="sm" disabled={!log.summary.trim()}>Log it</Button>
+                </div>
+              </form>
+              {logs.length === 0 ? (
+                <EmptyState compact icon={MessageSquareText} title="Nothing logged yet" description="Keep a record of calls and meetings. It helps when instructions are disputed later." />
+              ) : (
+                <ul className="space-y-2">
+                  {logs.map((l) => (
+                    <li key={l.id} className="rounded-xl bg-surface-2/70 px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <Badge tone={l.channel === "WhatsApp" ? "success" : l.channel === "Call" ? "info" : "neutral"}>{l.channel}</Badge>
+                        <span className="text-xs text-subtle-foreground">{formatRelativeTime(l.created_at)}</span>
+                      </div>
+                      <p className="mt-1.5 text-sm text-foreground">{l.summary}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </TabsContent>
+
+            <TabsContent value="documents" className="p-5">
+              {docs.length === 0 ? (
+                <EmptyState icon={FileText} title="No documents" description="Documents uploaded to this client's cases appear here." />
+              ) : (
+                <ul className="divide-y divide-border rounded-xl border border-border">
+                  {docs.map((d) => (
+                    <li key={d.id}>
+                      <Link href={`/documents?doc=${d.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-2/60">
+                        <FileText className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{d.filename}</span>
+                        <span className="shrink-0 text-xs text-subtle-foreground">{d.doc_category}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </TabsContent>
+
+            <TabsContent value="ai" className="p-5">
+              {!aiBrief ? (
+                <EmptyState
+                  icon={Sparkles}
+                  title="Prepare for a meeting"
+                  description="A short brief with matters, stage, fees and points to discuss."
+                  action={<Button onClick={handleAIBrief} loading={aiLoading}>{!aiLoading && <Sparkles />} {aiLoading ? "Preparing" : "Generate brief"}</Button>}
+                />
+              ) : (
+                <div className="space-y-4">
+                  <AIText content={aiBrief} />
+                  <div className="flex gap-2 border-t border-border pt-4">
+                    <Button size="sm" variant="outline" onClick={handleAIBrief} loading={aiLoading}>Regenerate</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { navigator.clipboard.writeText(aiBrief); toast("Copied", "success") }}><Copy /> Copy</Button>
                   </div>
                 </div>
               )}
-            </div>
-          )}
-        </div>
+            </TabsContent>
+          </Tabs>
+        </Card>
+
+        <aside className="space-y-5">
+          <Card>
+            <CardHeader title="At a glance" />
+            <dl className="px-5 pb-4 pt-1">
+              <DetailRow label="Open cases">{openCases.length} of {cases.length}</DetailRow>
+              <DetailRow label="Fees agreed">{formatINR(fees.agreed)}</DetailRow>
+              <DetailRow label="Received">{formatINR(fees.received)}</DetailRow>
+              <DetailRow label="Balance">
+                <span className={fees.balance ? "text-warning-soft-foreground" : "text-success-soft-foreground"}>{formatINR(fees.balance)}</span>
+              </DetailRow>
+            </dl>
+          </Card>
+          <Card>
+            <CardHeader title="Details" action={<Button variant="ghost" size="xs" onClick={() => setEditOpen(true)}>Edit</Button>} />
+            <dl className="px-5 pb-4 pt-1">
+              <DetailRow label="Email">{client.email || "Not added"}</DetailRow>
+              <DetailRow label="Language">{client.preferred_language}</DetailRow>
+              <DetailRow label={client.id_proof_type}>
+                {client.id_proof_number ? (
+                  <button type="button" onClick={() => setShowId((s) => !s)} className="font-mono text-[13px] hover:text-primary" title={showId ? "Hide" : "Show"}>
+                    {showId ? client.id_proof_number : maskId(client.id_proof_number)}
+                  </button>
+                ) : (
+                  "Not added"
+                )}
+              </DetailRow>
+              <DetailRow label="Referred by">{client.referred_by || "Not recorded"}</DetailRow>
+            </dl>
+            {client.address && <p className="border-t border-border px-5 py-3 text-[13px] text-muted-foreground">{client.address}</p>}
+            {client.notes && <p className="border-t border-border px-5 py-3 text-[13px] text-foreground">{client.notes}</p>}
+          </Card>
+        </aside>
       </div>
+
+      <ClientEditSheet client={client} open={editOpen} onOpenChange={setEditOpen} />
     </div>
+  )
+}
+
+type EditProps = { client: Client; open: boolean; onOpenChange: (o: boolean) => void }
+
+function ClientEditSheet(props: EditProps) {
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      {props.open && <ClientEditBody {...props} />}
+    </Dialog>
+  )
+}
+
+function ClientEditBody({ client, onOpenChange }: EditProps) {
+  const { toast } = useToast()
+  const [form, setForm] = useState(client)
+
+  const set = (k: keyof Client, v: string) => setForm((f) => ({ ...f, [k]: v }))
+
+  const save = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.full_name.trim()) return
+    updateClient(client.id, form)
+    toast("Client details saved", "success")
+    onOpenChange(false)
+  }
+
+  return (
+    <SheetContent
+      title="Edit client"
+      description={client.full_name}
+      footer={
+        <>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="submit" form="client-edit-form"><Save /> Save</Button>
+        </>
+      }
+    >
+      <form id="client-edit-form" onSubmit={save} className="grid gap-4 sm:grid-cols-2">
+        <Field label="Full name" required className="sm:col-span-2"><Input value={form.full_name} onChange={(e) => set("full_name", e.target.value)} /></Field>
+        <Field label="Mobile"><Input type="tel" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
+        <Field label="Email"><Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
+        <Field label="City"><Input value={form.city} onChange={(e) => set("city", e.target.value)} /></Field>
+        <Field label="Language">
+          <Select value={form.preferred_language} onChange={(e) => set("preferred_language", e.target.value)}>
+            {LANGUAGES.map((l) => <option key={l}>{l}</option>)}
+          </Select>
+        </Field>
+        <Field label="Address" className="sm:col-span-2"><Textarea rows={2} value={form.address} onChange={(e) => set("address", e.target.value)} /></Field>
+        <Field label="ID proof">
+          <Select value={form.id_proof_type} onChange={(e) => set("id_proof_type", e.target.value)}>
+            {ID_PROOF_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </Select>
+        </Field>
+        <Field label="ID number"><Input value={form.id_proof_number} onChange={(e) => set("id_proof_number", e.target.value)} className="font-mono" /></Field>
+        <Field label="Referred by" className="sm:col-span-2"><Input value={form.referred_by} onChange={(e) => set("referred_by", e.target.value)} /></Field>
+        <Field label="Notes" className="sm:col-span-2"><Textarea rows={3} value={form.notes} onChange={(e) => set("notes", e.target.value)} /></Field>
+      </form>
+    </SheetContent>
   )
 }

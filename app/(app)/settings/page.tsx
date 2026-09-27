@@ -1,281 +1,297 @@
 "use client"
 import { useState } from "react"
-import { Save, Camera, Plus, Trash2, Shield, Bell, Users, Palette, User, Building } from "lucide-react"
-import { cn } from "@/lib/utils"
-import { demoLawyer } from "@/lib/demo-data"
+import { Bell, Building2, Check, Minus, Monitor, Moon, Palette, Save, Sun, Trash2, UserRound, Users } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Field, Input, Select, Textarea } from "@/components/ui/field"
+import { Avatar, Chip, PageHeader, Switch } from "@/components/ui/misc"
 import { useToast } from "@/components/ui/toast"
+import { useConfirmDialog } from "@/components/ui/confirm-dialog"
+import { SPECIALIZATIONS } from "@/lib/constants"
+import { cn, isValidEmail } from "@/lib/utils"
+import { updateLawyer, useDB } from "@/lib/store"
+import { useTheme, type ThemePreference } from "@/lib/theme"
 
-const TABS = ["Profile", "Firm", "Notifications", "Team", "Appearance"]
+const SECTIONS = [
+  { id: "profile", label: "Profile", icon: UserRound },
+  { id: "firm", label: "Firm & letterhead", icon: Building2 },
+  { id: "notifications", label: "Reminders", icon: Bell },
+  { id: "team", label: "Team", icon: Users },
+  { id: "appearance", label: "Appearance", icon: Palette },
+] as const
+type Section = (typeof SECTIONS)[number]["id"]
 
-const teamMembers = [
-  { id: 1, name: "Rahul Yadav", email: "rahul.yadav@lexfirm.in", role: "Junior Advocate", status: "Active" },
-  { id: 2, name: "Priya Sharma", email: "priya.sharma@lexfirm.in", role: "Office Staff", status: "Active" },
-  { id: 3, name: "Vikash Kumar", email: "vikash.kumar@lexfirm.in", role: "Junior Advocate", status: "Invited" },
+const NOTIFY_KEY = "lexfirm-notification-prefs"
+const defaultNotify = {
+  client_day_before: true,
+  client_morning: false,
+  me_daily_board: true,
+  me_deadline_3_days: true,
+  me_weekly_summary: false,
+  me_fee_followup: true,
+}
+
+const notifyGroups = [
+  {
+    title: "Client reminders",
+    description: "Prepared for you to send on WhatsApp in the client's language.",
+    items: [
+      { key: "client_day_before", label: "Evening before the hearing" },
+      { key: "client_morning", label: "Morning of the hearing" },
+    ],
+  },
+  {
+    title: "For you",
+    description: "Shown on the Today screen and activity list.",
+    items: [
+      { key: "me_daily_board", label: "Tomorrow's board at 7 PM" },
+      { key: "me_deadline_3_days", label: "Deadlines 3 days before they fall due" },
+      { key: "me_fee_followup", label: "Fee balance older than 30 days" },
+      { key: "me_weekly_summary", label: "Weekly summary on Saturday" },
+    ],
+  },
+] as const
+
+const initialTeam = [
+  { id: 1, name: "Rahul Yadav", email: "rahul.yadav@lexfirm.in", role: "Associate", status: "Active" },
+  { id: 2, name: "Priya Sharma", email: "priya.sharma@lexfirm.in", role: "Clerk", status: "Active" },
+  { id: 3, name: "Vikash Kumar", email: "vikash.kumar@lexfirm.in", role: "Associate", status: "Invited" },
+]
+
+const permissions = [
+  { perm: "View cases and diary", senior: true, associate: true, clerk: true },
+  { perm: "Add hearings and outcomes", senior: true, associate: true, clerk: true },
+  { perm: "Edit case details", senior: true, associate: true, clerk: false },
+  { perm: "Draft and send notices", senior: true, associate: true, clerk: false },
+  { perm: "View and record fees", senior: true, associate: false, clerk: true },
+  { perm: "Delete records", senior: true, associate: false, clerk: false },
+  { perm: "Manage team", senior: true, associate: false, clerk: false },
 ]
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState("Profile")
+  const db = useDB()
   const { toast } = useToast()
-  const [profile, setProfile] = useState({ ...demoLawyer })
-  const [notifications, setNotifications] = useState({
-    whatsapp_hearing_day_before: true,
-    whatsapp_hearing_morning: true,
-    email_weekly_summary: false,
-    inapp_case_updates: true,
-    inapp_document_uploads: true,
-    inapp_hearing_reminders: true,
+  const { confirm, dialogElement } = useConfirmDialog()
+  const { preference, setPreference } = useTheme()
+  const [section, setSection] = useState<Section>("profile")
+  const [profile, setProfile] = useState(db.lawyer)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [notify, setNotify] = useState<typeof defaultNotify>(() => {
+    try {
+      return { ...defaultNotify, ...JSON.parse(localStorage.getItem(NOTIFY_KEY) ?? "{}") }
+    } catch {
+      return defaultNotify
+    }
   })
-  const [appearance, setAppearance] = useState({ theme: "light", density: "comfortable" })
-  const [inviteEmail, setInviteEmail] = useState("")
+  const [team, setTeam] = useState(initialTeam)
+  const [invite, setInvite] = useState({ email: "", role: "Associate" })
+  const [inviteError, setInviteError] = useState("")
 
-  const handleSave = () => {
-    toast("Settings saved successfully", "success")
+  const dirty = JSON.stringify(profile) !== JSON.stringify(db.lawyer)
+
+  const setP = <K extends keyof typeof profile>(k: K, v: (typeof profile)[K]) => {
+    setProfile((p) => ({ ...p, [k]: v }))
+    setErrors((e) => ({ ...e, [k]: "" }))
   }
 
-  const setP = (k: string, v: string | string[]) => setProfile(p => ({ ...p, [k]: v }))
-  const toggleN = (k: string) => setNotifications(n => ({ ...n, [k]: !n[k as keyof typeof n] }))
+  const saveProfile = () => {
+    const e: Record<string, string> = {}
+    if (!profile.name.trim()) e.name = "Name is required"
+    if (profile.email && !isValidEmail(profile.email)) e.email = "Enter a valid email"
+    if (!profile.firm_name.trim()) e.firm_name = "Firm name appears on every notice"
+    setErrors(e)
+    if (Object.keys(e).length) return
+    updateLawyer(profile)
+    toast("Settings saved", "success")
+  }
 
-  const SPECIALIZATIONS = ["Criminal Law", "Property Disputes", "Family Law", "Civil Law", "Constitutional Law", "Tax Law", "Corporate Law"]
+  const toggleNotify = (k: keyof typeof defaultNotify, v: boolean) => {
+    const next = { ...notify, [k]: v }
+    setNotify(next)
+    try { localStorage.setItem(NOTIFY_KEY, JSON.stringify(next)) } catch { /* ignore */ }
+  }
+
+  const sendInvite = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!isValidEmail(invite.email)) {
+      setInviteError("Enter a valid email address")
+      return
+    }
+    if (team.some((m) => m.email === invite.email)) {
+      setInviteError("This person is already on the team")
+      return
+    }
+    setTeam((t) => [...t, { id: Date.now(), name: invite.email.split("@")[0], email: invite.email, role: invite.role, status: "Invited" }])
+    toast(`Invite sent to ${invite.email}`, "success")
+    setInvite({ email: "", role: invite.role })
+    setInviteError("")
+  }
+
+  const saveBar = (section === "profile" || section === "firm") && (
+    <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3.5 sm:px-6">
+      {dirty && <span className="mr-auto text-[13px] text-muted-foreground">Unsaved changes</span>}
+      <Button variant="ghost" disabled={!dirty} onClick={() => { setProfile(db.lawyer); setErrors({}) }}>Discard</Button>
+      <Button disabled={!dirty} onClick={saveProfile}><Save /> Save</Button>
+    </div>
+  )
 
   return (
-    <div className="max-w-4xl mx-auto animate-fade-in">
-      <div className="flex items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">Settings</h1>
-          <p className="text-sm text-slate-500">Manage your profile and preferences</p>
-        </div>
-        <button onClick={handleSave}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-700 text-white text-sm font-medium rounded-xl hover:bg-indigo-800 transition-colors">
-          <Save className="w-4 h-4" /> Save Changes
-        </button>
-      </div>
+    <div className="space-y-6">
+      {dialogElement}
+      <PageHeader title="Settings" description="Your profile, letterhead, reminders and team." />
 
-      <div className="flex gap-6">
-        {/* Tab sidebar */}
-        <div className="w-44 flex-shrink-0 space-y-1">
-          {[
-            { tab: "Profile", icon: <User className="w-4 h-4" /> },
-            { tab: "Firm", icon: <Building className="w-4 h-4" /> },
-            { tab: "Notifications", icon: <Bell className="w-4 h-4" /> },
-            { tab: "Team", icon: <Users className="w-4 h-4" /> },
-            { tab: "Appearance", icon: <Palette className="w-4 h-4" /> },
-          ].map(({ tab, icon }) => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={cn("w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left",
-                activeTab === tab ? "bg-indigo-50 text-indigo-700 border-l-[3px] border-indigo-700 pl-[calc(0.75rem-3px)]" : "text-slate-600 hover:bg-slate-50")}>
-              {icon} {tab}
+      <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <nav aria-label="Settings sections" className="scrollbar-hide -mx-4 flex gap-1 overflow-x-auto px-4 lg:mx-0 lg:flex-col lg:px-0">
+          {SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setSection(s.id)}
+              aria-current={section === s.id ? "page" : undefined}
+              className={cn(
+                "flex h-9 shrink-0 items-center gap-2.5 rounded-[10px] px-3 text-sm font-medium transition-colors",
+                section === s.id ? "bg-surface text-foreground shadow-xs ring-1 ring-border" : "text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+              )}
+            >
+              <s.icon className="size-4" /> {s.label}
             </button>
           ))}
-        </div>
+        </nav>
 
-        {/* Content */}
-        <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-          {/* Profile */}
-          {activeTab === "Profile" && (
-            <div className="space-y-5 animate-fade-in">
-              <h2 className="text-sm font-semibold text-slate-700 border-b border-slate-100 pb-3">Lawyer Profile</h2>
-
-              {/* Avatar */}
+        <Card className="overflow-hidden">
+          {section === "profile" && (
+            <div className="space-y-6 p-5 sm:p-6 animate-fade-in">
               <div className="flex items-center gap-4">
-                <div className="relative">
-                  <div className="w-16 h-16 rounded-2xl bg-indigo-700 flex items-center justify-center text-white text-xl font-bold">
-                    MY
-                  </div>
-                  <button className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-slate-900 flex items-center justify-center">
-                    <Camera className="w-3 h-3 text-white" />
-                  </button>
-                </div>
+                <Avatar name={profile.name} size="lg" />
                 <div>
-                  <p className="text-sm font-semibold text-slate-900">Advocate Mahipal Yadav</p>
-                  <p className="text-xs text-slate-500">Senior Advocate</p>
-                  <button className="text-xs text-indigo-600 font-medium mt-1 hover:text-indigo-700">Upload Photo</button>
+                  <p className="text-base font-semibold text-foreground">Adv. {profile.name}</p>
+                  <p className="text-[13px] text-muted-foreground">{profile.title} · {profile.bar_council_no}</p>
                 </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  { key: "name", label: "Full Name" },
-                  { key: "bar_council_no", label: "Bar Council Number" },
-                  { key: "email", label: "Email" },
-                  { key: "phone", label: "Phone" },
-                ].map(f => (
-                  <div key={f.key}>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">{f.label}</label>
-                    <input value={(profile as any)[f.key] || ""}
-                      onChange={e => setP(f.key, e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400" />
-                  </div>
-                ))}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Full name" required error={errors.name}><Input value={profile.name} onChange={(e) => setP("name", e.target.value)} /></Field>
+                <Field label="Designation"><Input value={profile.title} onChange={(e) => setP("title", e.target.value)} placeholder="Advocate, Senior Advocate" /></Field>
+                <Field label="Bar Council enrolment no."><Input value={profile.bar_council_no} onChange={(e) => setP("bar_council_no", e.target.value)} className="font-mono" /></Field>
+                <Field label="Mobile"><Input type="tel" value={profile.phone} onChange={(e) => setP("phone", e.target.value)} /></Field>
+                <Field label="Email" error={errors.email} className="sm:col-span-2"><Input type="email" value={profile.email} onChange={(e) => setP("email", e.target.value)} /></Field>
               </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-2">Specializations</label>
+              <fieldset>
+                <legend className="mb-2 text-[13px] font-medium text-foreground">Practice areas</legend>
                 <div className="flex flex-wrap gap-2">
-                  {SPECIALIZATIONS.map(s => (
-                    <button key={s} onClick={() => {
-                      const current = profile.specializations || []
-                      const updated = current.includes(s) ? current.filter(x => x !== s) : [...current, s]
-                      setP("specializations", updated)
-                    }}
-                      className={cn("px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
-                        (profile.specializations || []).includes(s) ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "bg-slate-50 border-slate-200 text-slate-600 hover:border-indigo-200")}>
-                      {s}
-                    </button>
-                  ))}
+                  {SPECIALIZATIONS.map((s) => {
+                    const on = profile.specializations.includes(s)
+                    return (
+                      <Chip key={s} active={on} onClick={() => setP("specializations", on ? profile.specializations.filter((x) => x !== s) : [...profile.specializations, s])}>
+                        {on && <Check />} {s}
+                      </Chip>
+                    )
+                  })}
                 </div>
-              </div>
+              </fieldset>
+            </div>
+          )}
 
+          {section === "firm" && (
+            <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-2 animate-fade-in">
+              <div className="space-y-4">
+                <Field label="Firm / chamber name" required error={errors.firm_name}><Input value={profile.firm_name} onChange={(e) => setP("firm_name", e.target.value)} /></Field>
+                <Field label="Chamber address"><Textarea rows={3} value={profile.firm_address} onChange={(e) => setP("firm_address", e.target.value)} /></Field>
+                <Field label="GSTIN" hint="Optional. Printed on fee receipts when added."><Input value={profile.firm_gstin} onChange={(e) => setP("firm_gstin", e.target.value.toUpperCase())} className="font-mono" placeholder="06ABCDE1234F1Z5" /></Field>
+              </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Digital Signature</label>
-                <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-indigo-300 transition-colors cursor-pointer">
-                  <p className="text-xs text-slate-500">Drop signature image or click to upload</p>
-                  <button className="mt-2 text-xs text-indigo-600 font-medium">Upload Signature</button>
+                <p className="mb-2 text-[13px] font-medium text-foreground">Letterhead preview</p>
+                <div className="document-paper rounded-xl px-5 py-6 text-center font-serif">
+                  <p className="text-lg font-semibold">{profile.firm_name || "Firm name"}</p>
+                  <p className="mt-1 text-xs">Advocate {profile.name} · Enrolment {profile.bar_council_no}</p>
+                  <p className="text-xs opacity-80">{profile.firm_address}</p>
+                  <p className="text-xs opacity-80">{profile.phone} · {profile.email}</p>
+                  <div className="mx-auto mt-3 h-px w-3/4 bg-[#1b1b22]/40" />
                 </div>
+                <p className="mt-2 text-xs text-subtle-foreground">Used on every notice and printed cause list.</p>
               </div>
             </div>
           )}
 
-          {/* Firm */}
-          {activeTab === "Firm" && (
-            <div className="space-y-4 animate-fade-in">
-              <h2 className="text-sm font-semibold text-slate-700 border-b border-slate-100 pb-3">Firm Information</h2>
-              {[
-                { key: "firm_name", label: "Firm Name" },
-                { key: "firm_address", label: "Firm Address" },
-              ].map(f => (
-                <div key={f.key}>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">{f.label}</label>
-                  <input value={(profile as any)[f.key] || ""}
-                    onChange={e => setP(f.key, e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400" />
-                </div>
-              ))}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Firm Logo</label>
-                <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-300 transition-colors">
-                  <p className="text-xs text-slate-500">Upload firm logo (PNG/SVG)</p>
-                  <button className="mt-2 text-xs text-indigo-600 font-medium">Upload Logo</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Notifications */}
-          {activeTab === "Notifications" && (
-            <div className="space-y-5 animate-fade-in">
-              <h2 className="text-sm font-semibold text-slate-700 border-b border-slate-100 pb-3">Notification Preferences</h2>
-
-              {[
-                { group: "WhatsApp Reminders", items: [
-                  { key: "whatsapp_hearing_day_before", label: "Hearing day-before reminder to client" },
-                  { key: "whatsapp_hearing_morning", label: "Hearing morning-of reminder to client" },
-                ]},
-                { group: "Email Digests", items: [
-                  { key: "email_weekly_summary", label: "Weekly case summary email" },
-                ]},
-                { group: "In-App Notifications", items: [
-                  { key: "inapp_case_updates", label: "Case updates and status changes" },
-                  { key: "inapp_document_uploads", label: "New document uploads" },
-                  { key: "inapp_hearing_reminders", label: "Hearing reminders" },
-                ]},
-              ].map(section => (
-                <div key={section.group}>
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">{section.group}</p>
-                  <div className="space-y-3">
-                    {section.items.map(item => (
-                      <label key={item.key} className="flex items-center justify-between cursor-pointer p-3 rounded-xl hover:bg-slate-50 transition-colors">
-                        <span className="text-sm text-slate-700">{item.label}</span>
-                        <div
-                          onClick={() => toggleN(item.key)}
-                          className={cn("w-11 h-6 rounded-full transition-colors relative flex-shrink-0 cursor-pointer",
-                            notifications[item.key as keyof typeof notifications] ? "bg-indigo-700" : "bg-slate-200")}
-                        >
-                          <div className={cn("w-4 h-4 bg-white rounded-full absolute top-1 transition-transform",
-                            notifications[item.key as keyof typeof notifications] ? "translate-x-6" : "translate-x-1")} />
-                        </div>
+          {section === "notifications" && (
+            <div className="divide-y divide-border animate-fade-in">
+              {notifyGroups.map((g) => (
+                <section key={g.title} className="p-5 sm:p-6">
+                  <h2 className="text-sm font-semibold text-foreground">{g.title}</h2>
+                  <p className="mt-0.5 text-[13px] text-muted-foreground">{g.description}</p>
+                  <div className="mt-3 space-y-1">
+                    {g.items.map((item) => (
+                      <label key={item.key} className="flex cursor-pointer items-center justify-between gap-4 rounded-lg px-1 py-2.5">
+                        <span className="text-sm text-foreground">{item.label}</span>
+                        <Switch checked={notify[item.key]} onCheckedChange={(v) => toggleNotify(item.key, v)} aria-label={item.label} />
                       </label>
                     ))}
                   </div>
-                </div>
+                </section>
               ))}
+              <p className="px-5 py-4 text-xs text-subtle-foreground sm:px-6">Saved on this device automatically.</p>
             </div>
           )}
 
-          {/* Team */}
-          {activeTab === "Team" && (
-            <div className="space-y-5 animate-fade-in">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <h2 className="text-sm font-semibold text-slate-700">Team Members</h2>
-              </div>
+          {section === "team" && (
+            <div className="space-y-6 p-5 sm:p-6 animate-fade-in">
+              <form onSubmit={sendInvite} className="grid gap-2 sm:grid-cols-[1fr_160px_auto]">
+                <Field label="Invite by email" error={inviteError}>
+                  <Input type="email" value={invite.email} onChange={(e) => { setInvite((i) => ({ ...i, email: e.target.value })); setInviteError("") }} placeholder="junior@chamber.in" />
+                </Field>
+                <Field label="Role">
+                  <Select value={invite.role} onChange={(e) => setInvite((i) => ({ ...i, role: e.target.value }))}>
+                    <option>Associate</option>
+                    <option>Clerk</option>
+                    <option>Senior</option>
+                  </Select>
+                </Field>
+                <Button type="submit" className="self-start sm:mt-[26px]">Send invite</Button>
+              </form>
 
-              {/* Invite */}
-              <div className="flex gap-3">
-                <input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)}
-                  placeholder="Email address to invite"
-                  className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400" />
-                <select className="px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400 bg-white">
-                  <option>Junior Advocate</option>
-                  <option>Office Staff</option>
-                  <option>Senior Advocate</option>
-                </select>
-                <button onClick={() => { if (inviteEmail) { toast(`Invite sent to ${inviteEmail}`, "success"); setInviteEmail("") } }}
-                  className="px-4 py-2 bg-indigo-700 text-white text-sm font-medium rounded-xl hover:bg-indigo-800 transition-colors whitespace-nowrap">
-                  Invite
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                {teamMembers.map(member => (
-                  <div key={member.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:border-slate-200 hover:bg-slate-50 transition-all">
-                    <div className="w-9 h-9 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 text-sm font-bold">
-                      {member.name.split(" ").map(n => n[0]).join("")}
+              <ul className="divide-y divide-border rounded-xl border border-border">
+                {team.map((m) => (
+                  <li key={m.id} className="flex items-center gap-3 px-4 py-3">
+                    <Avatar name={m.name} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium capitalize text-foreground">{m.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{m.email}</p>
                     </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-slate-900">{member.name}</p>
-                      <p className="text-xs text-slate-500">{member.email}</p>
-                    </div>
-                    <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-medium">{member.role}</span>
-                    <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium",
-                      member.status === "Active" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
-                      {member.status}
-                    </span>
-                    <button className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                    <Badge className="hidden sm:inline-flex">{m.role}</Badge>
+                    <Badge tone={m.status === "Active" ? "success" : "warning"}>{m.status}</Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Remove ${m.name}`}
+                      onClick={() => confirm("Remove team member?", `${m.email} will lose access to your cases.`, () => setTeam((t) => t.filter((x) => x.id !== m.id)), "Remove")}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </li>
                 ))}
-              </div>
+              </ul>
 
-              {/* Permission Matrix */}
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Role Permissions</p>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
+              <section>
+                <h2 className="text-sm font-semibold text-foreground">What each role can do</h2>
+                <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+                  <table className="w-full text-left text-[13px]">
                     <thead>
-                      <tr className="bg-slate-50">
-                        <th className="text-left px-3 py-2 font-semibold text-slate-600">Permission</th>
-                        <th className="px-3 py-2 text-center font-semibold text-slate-600">Senior</th>
-                        <th className="px-3 py-2 text-center font-semibold text-slate-600">Junior</th>
-                        <th className="px-3 py-2 text-center font-semibold text-slate-600">Staff</th>
+                      <tr className="border-b border-border bg-surface-2/60 text-xs text-muted-foreground">
+                        <th scope="col" className="px-4 py-2.5 font-medium">Permission</th>
+                        {["Senior", "Associate", "Clerk"].map((r) => <th key={r} scope="col" className="px-4 py-2.5 text-center font-medium">{r}</th>)}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {[
-                        { perm: "View Cases", senior: true, junior: true, staff: true },
-                        { perm: "Edit Cases", senior: true, junior: true, staff: false },
-                        { perm: "Delete Cases", senior: true, junior: false, staff: false },
-                        { perm: "Manage Clients", senior: true, junior: true, staff: false },
-                        { perm: "Generate Notices", senior: true, junior: true, staff: false },
-                        { perm: "Manage Team", senior: true, junior: false, staff: false },
-                      ].map(row => (
-                        <tr key={row.perm} className="hover:bg-slate-50">
-                          <td className="px-3 py-2 text-slate-700">{row.perm}</td>
-                          {["senior", "junior", "staff"].map(role => (
-                            <td key={role} className="px-3 py-2 text-center">
-                              <span className={cn("w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px]",
-                                row[role as keyof typeof row] ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400")}>
-                                {row[role as keyof typeof row] ? "✓" : "✗"}
-                              </span>
+                    <tbody className="divide-y divide-border">
+                      {permissions.map((row) => (
+                        <tr key={row.perm}>
+                          <td className="px-4 py-2.5 text-foreground">{row.perm}</td>
+                          {(["senior", "associate", "clerk"] as const).map((r) => (
+                            <td key={r} className="px-4 py-2.5 text-center">
+                              {row[r] ? (
+                                <Check className="mx-auto size-4 text-success" aria-label="Allowed" />
+                              ) : (
+                                <Minus className="mx-auto size-4 text-subtle-foreground" aria-label="Not allowed" />
+                              )}
                             </td>
                           ))}
                         </tr>
@@ -283,52 +299,48 @@ export default function SettingsPage() {
                     </tbody>
                   </table>
                 </div>
+              </section>
+            </div>
+          )}
+
+          {section === "appearance" && (
+            <div className="p-5 sm:p-6 animate-fade-in">
+              <h2 className="text-sm font-semibold text-foreground">Theme</h2>
+              <p className="mt-0.5 text-[13px] text-muted-foreground">Dark mode is easier on the eyes for late-night drafting.</p>
+              <div role="radiogroup" aria-label="Theme" className="mt-4 grid gap-3 sm:grid-cols-3">
+                {([
+                  { value: "light", label: "Light", icon: Sun, preview: "bg-[#f6f7fb]", bar: "bg-white", line: "bg-[#e3e5ee]" },
+                  { value: "dark", label: "Dark", icon: Moon, preview: "bg-[#0b0c14]", bar: "bg-[#12131e]", line: "bg-[#25273a]" },
+                  { value: "system", label: "Match device", icon: Monitor, preview: "bg-linear-to-r from-[#f6f7fb] from-50% to-[#0b0c14] to-50%", bar: "bg-white/80", line: "bg-[#8b8ffa]/40" },
+                ] as { value: ThemePreference; label: string; icon: typeof Sun; preview: string; bar: string; line: string }[]).map((t) => (
+                  <button
+                    key={t.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={preference === t.value}
+                    onClick={() => setPreference(t.value)}
+                    className={cn(
+                      "rounded-2xl border p-2 text-left transition-colors",
+                      preference === t.value ? "border-primary ring-2 ring-primary/20" : "border-border hover:border-border-strong"
+                    )}
+                  >
+                    <div className={cn("flex h-20 flex-col gap-1.5 rounded-xl border border-border p-2.5", t.preview)}>
+                      <span className={cn("h-3 w-1/2 rounded", t.bar)} />
+                      <span className={cn("h-2 w-3/4 rounded", t.line)} />
+                      <span className={cn("h-2 w-2/3 rounded", t.line)} />
+                    </div>
+                    <p className="mt-2 flex items-center gap-2 px-1 pb-1 text-[13px] font-medium text-foreground">
+                      <t.icon className="size-4 text-muted-foreground" /> {t.label}
+                      {preference === t.value && <Check className="ml-auto size-4 text-primary" />}
+                    </p>
+                  </button>
+                ))}
               </div>
             </div>
           )}
 
-          {/* Appearance */}
-          {activeTab === "Appearance" && (
-            <div className="space-y-5 animate-fade-in">
-              <h2 className="text-sm font-semibold text-slate-700 border-b border-slate-100 pb-3">Appearance</h2>
-
-              <div>
-                <p className="text-xs font-semibold text-slate-600 mb-3">Theme</p>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { value: "light", label: "Light", preview: "bg-white border-slate-200" },
-                    { value: "dark", label: "Dark", preview: "bg-slate-900 border-slate-700" },
-                    { value: "system", label: "System", preview: "bg-gradient-to-r from-white to-slate-900 border-slate-300" },
-                  ].map(t => (
-                    <button key={t.value} onClick={() => setAppearance(a => ({ ...a, theme: t.value }))}
-                      className={cn("p-4 rounded-xl border-2 transition-colors",
-                        appearance.theme === t.value ? "border-indigo-700" : "border-slate-100 hover:border-slate-200")}>
-                      <div className={cn("w-full h-8 rounded-lg mb-2 border", t.preview)} />
-                      <p className="text-xs font-medium text-slate-700 text-center">{t.label}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-xs font-semibold text-slate-600 mb-3">Layout Density</p>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { value: "comfortable", label: "Comfortable", desc: "More spacing, easier to read" },
-                    { value: "compact", label: "Compact", desc: "Denser, more content visible" },
-                  ].map(d => (
-                    <button key={d.value} onClick={() => setAppearance(a => ({ ...a, density: d.value }))}
-                      className={cn("p-4 rounded-xl border-2 text-left transition-colors",
-                        appearance.density === d.value ? "border-indigo-700 bg-indigo-50/30" : "border-slate-100 hover:border-slate-200")}>
-                      <p className="text-sm font-semibold text-slate-900 mb-1">{d.label}</p>
-                      <p className="text-xs text-slate-500">{d.desc}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+          {saveBar}
+        </Card>
       </div>
     </div>
   )

@@ -1,301 +1,316 @@
 "use client"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, ArrowRight, Check, Sparkles, Download, MessageSquare, ChevronRight } from "lucide-react"
-import { cn } from "@/lib/utils"
-import { noticeTemplates } from "@/lib/demo-data"
-import { addNotice, getCases, getClients, getLawyer } from "@/lib/store"
-import { callGemini } from "@/lib/gemini"
+import {
+  ArrowLeft, ArrowRight, Ban, Check, FileSignature, FilePen, Gavel, HeartHandshake, Home, IndianRupee, Printer, Reply, Sparkles,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { Field, Input, Select, Textarea } from "@/components/ui/field"
+import { PageHeader } from "@/components/ui/misc"
 import { useToast } from "@/components/ui/toast"
+import { NoticePaper } from "@/components/practice/notice-paper"
+import { noticeTemplates, type NoticeTemplateIcon } from "@/lib/demo-data"
+import { cn, formatINR, todayISO } from "@/lib/utils"
+import { AI_DRAFT_KEY } from "@/lib/constants"
+import { addNotice, uid, useDB } from "@/lib/store"
+import { callGemini } from "@/lib/gemini"
 
-const STEPS = ["Select Template", "Fill Details", "Review & Export"]
+const templateIcons: Record<NoticeTemplateIcon, React.ComponentType<{ className?: string }>> = {
+  demand: IndianRupee,
+  eviction: Home,
+  reply: Reply,
+  cease: Ban,
+  divorce: HeartHandshake,
+  bail: Gavel,
+  vakalatnama: FileSignature,
+  custom: FilePen,
+}
+
+const STEPS = ["Template", "Details", "Review"]
+
+function readPrefill() {
+  const params = new URLSearchParams(window.location.search)
+  let aiText = ""
+  if (params.get("from") === "ai") {
+    try {
+      aiText = sessionStorage.getItem(AI_DRAFT_KEY) ?? ""
+    } catch {
+      aiText = ""
+    }
+  }
+  return { caseId: params.get("case") ?? "", aiText }
+}
+
+function basicNotice(type: string, form: { facts: string; amount: string; due_days: string }) {
+  const amountLine = form.amount ? `\n\n3. That a sum of ${formatINR(Number(form.amount))} is due and payable by you to my client.` : ""
+  return `Under instructions from and on behalf of my client, I hereby serve upon you the following legal notice:
+
+1. That my client has instructed me to address this notice to you in respect of the matter stated below.
+
+2. That the facts giving rise to this notice are as follows: ${form.facts || "[state the facts]"}${amountLine}
+
+${form.amount ? "4" : "3"}. That you are hereby called upon to comply with the above within ${form.due_days || "15"} days of receipt of this notice, failing which my client shall be constrained to initiate appropriate civil and/or criminal proceedings against you at your risk as to costs and consequences.
+
+${form.amount ? "5" : "4"}. That a copy of this notice has been retained in my office for record and further action.
+
+This ${type.toLowerCase()} is issued without prejudice to the other rights and remedies available to my client.`
+}
 
 export default function NewNoticePage() {
   const router = useRouter()
+  const db = useDB()
   const { toast } = useToast()
+  const [prefill] = useState(readPrefill)
+  const prefillCase = db.cases.find((c) => c.id === prefill.caseId)
+
   const [step, setStep] = useState(0)
-  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
+  const [templateId, setTemplateId] = useState<string | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
-  const [noticeContent, setNoticeContent] = useState("")
-
-  const cases = getCases()
-  const clients = getClients()
-  const lawyer = getLawyer()
-
+  const [content, setContent] = useState("")
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [form, setForm] = useState({
-    sender_name: lawyer.name,
-    recipient_name: "",
+    case_id: prefillCase?.id ?? "",
+    recipient_name: prefillCase?.opposing_party && prefillCase.opposing_party !== "N/A" ? prefillCase.opposing_party : "",
     recipient_address: "",
-    case_reference: "",
-    date: new Date().toISOString().split("T")[0],
-    additional_facts: "",
+    date: todayISO(),
     amount: "",
-    due_date: "",
+    due_days: "15",
+    cheque: "",
     fir_number: "",
     section: "",
+    property_address: "",
     grounds: "",
+    facts: prefill.aiText,
   })
 
-  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const template = noticeTemplates.find((t) => t.id === templateId)
+  const selectedCase = db.cases.find((c) => c.id === form.case_id)
+  const client = selectedCase ? db.clients.find((c) => c.id === selectedCase.client_id) : undefined
 
-  const template = noticeTemplates.find(t => t.id === selectedTemplate)
+  const set = (k: keyof typeof form, v: string) => {
+    setForm((f) => {
+      const next = { ...f, [k]: v }
+      if (k === "case_id") {
+        const c = db.cases.find((x) => x.id === v)
+        if (c && !f.recipient_name && c.opposing_party !== "N/A") next.recipient_name = c.opposing_party
+      }
+      return next
+    })
+    setErrors((e) => ({ ...e, [k]: "" }))
+  }
 
-  const handleGenerateAI = async () => {
-    if (!template) return
+  const validateDetails = () => {
+    const e: Record<string, string> = {}
+    if (!form.recipient_name.trim()) e.recipient_name = "Who is this notice addressed to?"
+    if (template?.fields.includes("amount") && form.amount && isNaN(Number(form.amount))) e.amount = "Enter a number"
+    setErrors(e)
+    return Object.keys(e).length === 0
+  }
+
+  const generateAI = async () => {
+    if (!template || !validateDetails()) return
     setAiLoading(true)
-    const prompt = `Draft a formal ${template.title} for Indian court:
-Sender: Advocate ${form.sender_name}
-Recipient: ${form.recipient_name}
-Address: ${form.recipient_address}
-Case Reference: ${form.case_reference}
-Date: ${form.date}
+    const prompt = `Draft the body of a formal ${template.title} in Indian legal format with numbered paragraphs.
+Advocate: ${db.lawyer.name}, ${db.lawyer.firm_name}
+Client: ${client?.full_name ?? "[client]"}
+Recipient: ${form.recipient_name}, ${form.recipient_address}
+Case reference: ${selectedCase ? `${selectedCase.case_number}, ${selectedCase.title}` : "none"}
 ${form.amount ? `Amount: ₹${form.amount}` : ""}
-${form.due_date ? `Due Date: ${form.due_date}` : ""}
-${form.fir_number ? `FIR No: ${form.fir_number}` : ""}
-${form.section ? `Section: ${form.section}` : ""}
+${form.cheque ? `Cheque details: ${form.cheque}` : ""}
+${form.fir_number ? `FIR: ${form.fir_number}, sections ${form.section}` : ""}
+${form.property_address ? `Property: ${form.property_address}` : ""}
 ${form.grounds ? `Grounds: ${form.grounds}` : ""}
-Additional Facts: ${form.additional_facts}
+Compliance period: ${form.due_days} days
+Facts: ${form.facts}
 
-Draft the complete formal legal notice in proper Indian legal format with numbered paragraphs. Include "For your review - suggested language only" disclaimer.`
-
+Return only the numbered body. Do not repeat the letterhead, date, recipient or signature.`
     const result = await callGemini(prompt)
-    setNoticeContent(result)
+    setContent(result)
     setAiLoading(false)
     setStep(2)
   }
 
-  const handleSave = () => {
-    const notice = addNotice({
-      id: `n${Date.now()}`,
-      case_id: cases.find(c => c.case_number === form.case_reference)?.id || "",
-      lawyer_id: "lawyer-1",
-      title: `${template?.title} — ${form.recipient_name}`,
-      notice_type: template?.title || "Custom",
-      content: noticeContent,
-      status: "Draft",
-      created_at: new Date().toISOString(),
+  const applyStandardFormat = () => {
+    if (!template || !validateDetails()) return
+    setContent(basicNotice(template.title, form))
+    setStep(2)
+  }
+
+  const save = (status: "Draft" | "Sent") => {
+    if (!template) return
+    const n = addNotice({
+      id: uid("n"),
+      case_id: form.case_id,
+      lawyer_id: db.lawyer.id,
+      title: `${template.title} to ${form.recipient_name}`,
+      notice_type: template.title,
+      recipient_name: form.recipient_name + (form.recipient_address ? `\n${form.recipient_address}` : ""),
+      content,
+      status,
+      created_at: new Date(`${form.date}T10:00:00`).toISOString(),
     })
-    toast("Notice saved as draft", "success")
-    router.push("/notices")
+    try { sessionStorage.removeItem(AI_DRAFT_KEY) } catch { /* ignore */ }
+    toast(status === "Sent" ? "Notice saved and marked as sent" : "Notice saved as draft", "success")
+    router.push(`/notices/${n.id}`)
   }
 
   return (
-    <div className="max-w-3xl mx-auto animate-fade-in">
-      <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => step > 0 ? setStep(s => s - 1) : router.back()}
-          className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 transition-colors">
-          <ArrowLeft className="w-4 h-4" />
-        </button>
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">Generate Legal Notice</h1>
-          <p className="text-sm text-slate-500">AI-powered notice generation</p>
-        </div>
-      </div>
+    <div className="mx-auto max-w-4xl space-y-6">
+      <PageHeader
+        className="no-print"
+        back={{ href: "/notices", label: "Notices" }}
+        title="Draft a notice"
+        description={template ? template.title : "Pick a format. You can edit every word before saving."}
+      />
 
-      {/* Steps */}
-      <div className="flex items-center gap-2 mb-8">
+      <ol className="no-print flex items-center gap-2" aria-label="Progress">
         {STEPS.map((s, i) => (
-          <div key={s} className="flex items-center gap-2 flex-1">
-            <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 transition-all",
-              i < step ? "bg-emerald-500 text-white" : i === step ? "bg-indigo-700 text-white" : "bg-slate-100 text-slate-400")}>
-              {i < step ? <Check className="w-4 h-4" /> : i + 1}
-            </div>
-            <span className={cn("text-sm font-medium hidden sm:block", i === step ? "text-slate-900" : "text-slate-400")}>{s}</span>
-            {i < STEPS.length - 1 && <div className={cn("flex-1 h-px", i < step ? "bg-emerald-300" : "bg-slate-200")} />}
-          </div>
+          <li key={s} className="flex flex-1 items-center gap-2">
+            <span
+              className={cn(
+                "flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+                i < step ? "bg-success text-success-foreground" : i === step ? "bg-primary text-primary-foreground" : "bg-surface-3 text-muted-foreground"
+              )}
+            >
+              {i < step ? <Check className="size-3.5" /> : i + 1}
+            </span>
+            <span className={cn("text-[13px] font-medium", i === step ? "text-foreground" : "text-muted-foreground")}>{s}</span>
+            {i < STEPS.length - 1 && <span className={cn("h-px flex-1", i < step ? "bg-success/50" : "bg-border")} />}
+          </li>
         ))}
-      </div>
+      </ol>
 
-      {/* Step 1: Select Template */}
       {step === 0 && (
-        <div className="animate-fade-in">
-          <p className="text-sm text-slate-600 mb-4">Choose a notice template to get started</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {noticeTemplates.map(t => (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 animate-fade-in">
+          {noticeTemplates.map((t) => {
+            const Icon = templateIcons[t.icon]
+            return (
               <button
                 key={t.id}
-                onClick={() => { setSelectedTemplate(t.id); setStep(1) }}
+                type="button"
+                onClick={() => { setTemplateId(t.id); setStep(1) }}
                 className={cn(
-                  "flex items-start gap-4 p-4 rounded-2xl border-2 text-left transition-all card-hover",
-                  selectedTemplate === t.id ? "border-indigo-700 bg-indigo-50" : "border-slate-100 bg-white hover:border-indigo-200"
+                  "flex flex-col items-start gap-3 rounded-2xl border bg-surface p-4 text-left shadow-xs transition-[border-color,box-shadow]",
+                  templateId === t.id ? "border-primary ring-2 ring-primary/15" : "border-border hover:border-border-strong hover:shadow-md"
                 )}
               >
-                <span className="text-2xl">{t.icon}</span>
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">{t.title}</p>
-                  <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{t.description}</p>
-                </div>
+                <span className="flex size-9 items-center justify-center rounded-lg bg-primary-soft text-primary-soft-foreground"><Icon className="size-[18px]" /></span>
+                <span>
+                  <span className="block text-sm font-semibold text-foreground">{t.title}</span>
+                  <span className="mt-0.5 block text-[13px] leading-snug text-muted-foreground">{t.description}</span>
+                </span>
               </button>
-            ))}
-          </div>
+            )
+          })}
         </div>
       )}
 
-      {/* Step 2: Fill Details */}
       {step === 1 && template && (
-        <div className="space-y-4 animate-fade-in">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-xl">{template.icon}</span>
-            <h2 className="text-base font-semibold text-slate-900">{template.title}</h2>
-          </div>
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { key: "sender_name", label: "Sender (Lawyer) Name *" },
-                { key: "recipient_name", label: "Recipient Name *" },
-                { key: "date", label: "Date", type: "date" },
-                { key: "case_reference", label: "Case Reference" },
-              ].map(f => (
-                <div key={f.key}>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">{f.label}</label>
-                  <input
-                    type={f.type || "text"}
-                    value={form[f.key as keyof typeof form]}
-                    onChange={e => set(f.key, e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100"
-                  />
-                </div>
-              ))}
-            </div>
+        <Card className="p-5 sm:p-6 animate-fade-in">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Case (optional)" hint="Fills in the reference and opposite party" className="sm:col-span-2">
+              <Select value={form.case_id} onChange={(e) => set("case_id", e.target.value)}>
+                <option value="">Not linked to a case</option>
+                {db.cases.map((c) => <option key={c.id} value={c.id}>{c.case_number} · {c.title}</option>)}
+              </Select>
+            </Field>
+            <Field label="Addressed to" required error={errors.recipient_name}>
+              <Input value={form.recipient_name} onChange={(e) => set("recipient_name", e.target.value)} placeholder="M/s Kapoor Industries Ltd." />
+            </Field>
+            <Field label="Date of notice">
+              <Input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} />
+            </Field>
+            <Field label="Recipient address" className="sm:col-span-2">
+              <Textarea rows={2} value={form.recipient_address} onChange={(e) => set("recipient_address", e.target.value)} placeholder="Registered office / residence, with PIN" />
+            </Field>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">Recipient Address</label>
-              <textarea value={form.recipient_address} onChange={e => set("recipient_address", e.target.value)}
-                rows={2} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400 resize-none" />
-            </div>
-
-            {/* Template-specific fields */}
-            {template.fields.includes("amount") && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Amount (₹)</label>
-                  <input value={form.amount} onChange={e => set("amount", e.target.value)}
-                    placeholder="e.g., 500000" className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Payment Due Date</label>
-                  <input type="date" value={form.due_date} onChange={e => set("due_date", e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400" />
-                </div>
-              </div>
+            {(template.fields.includes("amount")) && (
+              <>
+                <Field label="Amount claimed (₹)" error={errors.amount} hint={form.amount ? formatINR(Number(form.amount)) : undefined}>
+                  <Input inputMode="numeric" className="tabular" value={form.amount} onChange={(e) => set("amount", e.target.value.replace(/[^\d]/g, ""))} />
+                </Field>
+                <Field label="Time to comply (days)">
+                  <Select value={form.due_days} onChange={(e) => set("due_days", e.target.value)}>
+                    {["7", "15", "30"].map((d) => <option key={d}>{d}</option>)}
+                  </Select>
+                </Field>
+              </>
             )}
-
+            {template.fields.includes("cheque") && (
+              <Field label="Cheque details" hint="Number, date, bank, return memo date" className="sm:col-span-2">
+                <Input value={form.cheque} onChange={(e) => set("cheque", e.target.value)} placeholder="Chq 004512 dt 02.03.2024, SBI Rohtak, returned 20.03.2024" />
+              </Field>
+            )}
             {template.fields.includes("fir_number") && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">FIR Number</label>
-                  <input value={form.fir_number} onChange={e => set("fir_number", e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">IPC Section</label>
-                  <input value={form.section} onChange={e => set("section", e.target.value)}
-                    placeholder="e.g., 420, 302" className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400" />
-                </div>
-              </div>
+              <>
+                <Field label="FIR number and police station">
+                  <Input value={form.fir_number} onChange={(e) => set("fir_number", e.target.value)} placeholder="FIR 234/2024, PS City Rohtak" />
+                </Field>
+                <Field label="Sections">
+                  <Input value={form.section} onChange={(e) => set("section", e.target.value)} placeholder="BNS 318(4), 61" />
+                </Field>
+              </>
             )}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">Additional Facts / Custom Content</label>
-              <textarea value={form.additional_facts} onChange={e => set("additional_facts", e.target.value)}
-                rows={4} placeholder="Add any specific facts, circumstances, or additional details..."
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400 resize-none" />
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button onClick={handleGenerateAI} disabled={aiLoading || !form.recipient_name}
-                className="flex-1 inline-flex items-center justify-center gap-2 py-3 bg-indigo-700 text-white font-medium rounded-xl hover:bg-indigo-800 transition-colors disabled:opacity-50">
-                {aiLoading ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Generating...</> : <><Sparkles className="w-4 h-4" /> Generate with AI</>}
-              </button>
-              <button onClick={() => { setNoticeContent(generateBasicNotice(template.title, form, lawyer.name)); setStep(2) }}
-                className="px-4 py-3 text-sm font-medium text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
-                Basic Draft
-              </button>
+            {template.fields.includes("property_address") && (
+              <Field label="Property" className="sm:col-span-2">
+                <Input value={form.property_address} onChange={(e) => set("property_address", e.target.value)} placeholder="Shop No. 12, Main Market, Rohtak" />
+              </Field>
+            )}
+            {template.fields.includes("grounds") && (
+              <Field label="Grounds" className="sm:col-span-2">
+                <Textarea rows={3} value={form.grounds} onChange={(e) => set("grounds", e.target.value)} />
+              </Field>
+            )}
+            <Field label="Facts and instructions" hint="Plain language is fine. AI turns it into numbered paragraphs." className="sm:col-span-2">
+              <Textarea rows={5} value={form.facts} onChange={(e) => set("facts", e.target.value)} placeholder="Who, what, when, how much, what the client wants" />
+            </Field>
+          </div>
+          <div className="mt-6 flex flex-col-reverse gap-2 border-t border-border pt-5 sm:flex-row sm:items-center">
+            <Button variant="ghost" onClick={() => setStep(0)}><ArrowLeft /> Templates</Button>
+            <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:justify-end">
+              <Button variant="outline" onClick={applyStandardFormat}>Use standard format <ArrowRight /></Button>
+              <Button onClick={generateAI} loading={aiLoading}>{!aiLoading && <Sparkles />} {aiLoading ? "Drafting" : "Draft with AI"}</Button>
             </div>
           </div>
-        </div>
+        </Card>
       )}
 
-      {/* Step 3: Review */}
-      {step === 2 && (
-        <div className="space-y-5 animate-fade-in">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-slate-900">Review Notice</h2>
-            <div className="flex gap-2">
-              <button onClick={handleGenerateAI} disabled={aiLoading} className="inline-flex items-center gap-1.5 px-3 py-2 bg-indigo-50 text-indigo-700 text-xs font-medium rounded-xl hover:bg-indigo-100 transition-colors">
-                <Sparkles className="w-3.5 h-3.5" /> Improve Language
-              </button>
-            </div>
+      {step === 2 && template && (
+        <div className="space-y-4 animate-fade-in">
+          <div className="no-print flex flex-wrap items-center gap-2">
+            <Button variant="ghost" onClick={() => setStep(1)}><ArrowLeft /> Edit details</Button>
+            <Button variant="outline" onClick={generateAI} loading={aiLoading}>{!aiLoading && <Sparkles />} Redraft</Button>
+            <p className="ml-auto text-xs text-subtle-foreground">Click the text on the page to edit it.</p>
           </div>
 
-          {/* Paper notice */}
-          <div className="notice-paper rounded-2xl p-8 min-h-[600px]">
-            <div className="text-center mb-6">
-              <p className="text-lg font-bold text-slate-900">{lawyer.firm_name}</p>
-              <p className="text-xs text-slate-500 mt-1">{lawyer.firm_address}</p>
-              <p className="text-xs text-slate-500">Bar Council No: {lawyer.bar_council_no}</p>
-              <div className="w-16 h-px bg-slate-300 mx-auto mt-4" />
-            </div>
-            <div className="text-right mb-4">
-              <p className="text-sm text-slate-700">Date: {form.date}</p>
-            </div>
-            <div className="mb-6">
-              <p className="text-sm font-bold text-slate-900">To,</p>
-              <p className="text-sm text-slate-800">{form.recipient_name || "[Recipient Name]"}</p>
-              <p className="text-sm text-slate-700 whitespace-pre-line">{form.recipient_address || "[Address]"}</p>
-            </div>
-            <p className="text-sm font-bold text-slate-900 mb-4 text-center underline uppercase">
-              {template?.title || "Legal Notice"}
-            </p>
-            <textarea
-              value={noticeContent}
-              onChange={e => setNoticeContent(e.target.value)}
-              className="w-full text-sm text-slate-800 leading-relaxed outline-none resize-none min-h-[300px] bg-transparent"
-              placeholder="Notice content will appear here after generation..."
+          <NoticePaper
+            lawyer={db.lawyer}
+            date={form.date}
+            recipientName={form.recipient_name}
+            recipientAddress={form.recipient_address}
+            subject={template.title}
+            reference={selectedCase?.case_number}
+          >
+            <Textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={Math.max(14, content.split("\n").length + 2)}
+              aria-label="Notice text"
+              className="resize-none border-transparent bg-transparent p-0 font-serif text-[14.5px] leading-[1.8] text-[#1b1b22] shadow-none hover:border-transparent focus:border-[#1b1b22]/20 focus:ring-0 print:hidden"
             />
-            <div className="mt-6 pt-4 border-t border-slate-200">
-              <p className="text-sm text-slate-900 font-semibold">Advocate {lawyer.name}</p>
-              <p className="text-xs text-slate-500">{lawyer.firm_name}</p>
-              <p className="text-xs text-slate-400 mt-4 italic">*For your review — suggested language only. Please verify before filing.</p>
-            </div>
-          </div>
+            <div className="hidden whitespace-pre-line print:block">{content}</div>
+          </NoticePaper>
 
-          <div className="flex gap-3">
-            <button onClick={handleSave} className="flex-1 inline-flex items-center justify-center gap-2 py-3 bg-indigo-700 text-white font-medium rounded-xl hover:bg-indigo-800 transition-colors">
-              <Check className="w-4 h-4" /> Save to Case
-            </button>
-            <button className="px-4 py-3 inline-flex items-center gap-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
-              <Download className="w-4 h-4" /> Export PDF
-            </button>
-            <button className="px-4 py-3 inline-flex items-center gap-2 text-sm font-medium text-emerald-700 border border-emerald-200 rounded-xl hover:bg-emerald-50 transition-colors">
-              <MessageSquare className="w-4 h-4" /> Share WA
-            </button>
+          <p className="no-print text-xs text-subtle-foreground">Suggested language for your review. Verify facts, dates and provisions before signing.</p>
+
+          <div className="no-print flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:justify-end">
+            <Button variant="outline" onClick={() => window.print()}><Printer /> Print / PDF</Button>
+            <Button variant="outline" onClick={() => save("Draft")}>Save draft</Button>
+            <Button onClick={() => save("Sent")}><Check /> Save and mark sent</Button>
           </div>
         </div>
       )}
     </div>
   )
-}
-
-function generateBasicNotice(type: string, form: any, lawyerName: string) {
-  return `LEGAL NOTICE — ${type.toUpperCase()}
-
-Under instructions from and on behalf of my client, I hereby issue this legal notice to you as follows:
-
-1. That my client has engaged me to send you this legal notice regarding the matter stated herein.
-
-2. That the facts of the case are as follows: ${form.additional_facts || "[Facts to be added]"}
-
-3. That you are hereby called upon to comply with the demands stated herein within 15 (fifteen) days of receipt of this notice.
-
-4. That in case of failure to comply, my client shall be constrained to take appropriate legal proceedings against you in the competent court of law, at your risk, cost and consequences.
-
-5. All rights of my client are expressly reserved.
-
-This notice is sent without prejudice.
-
-Advocate ${lawyerName}
-[Bar Council Registration Number]
-
-*This is a draft notice for your review. Please verify all details before dispatching.*`
 }

@@ -1,83 +1,78 @@
 "use client"
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react"
+import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react"
+import { useStoredValue } from "./use-stored-value"
+import { useHydrated } from "./use-hydrated"
 
-type Theme = "light" | "dark"
+export type ThemePreference = "light" | "dark" | "system"
+export type ResolvedTheme = "light" | "dark"
 
 type ThemeContextValue = {
-  theme: Theme
+  /** What the user picked (light, dark or follow the device). */
+  preference: ThemePreference
+  /** What is on screen right now. */
+  theme: ResolvedTheme
+  setPreference: (p: ThemePreference) => void
   toggleTheme: () => void
 }
 
+export const THEME_STORAGE_KEY = "lexfirm-theme"
+export const SIDEBAR_STORAGE_KEY = "lexfirm-sidebar-collapsed"
+
+/**
+ * Runs in <head> before first paint so the page never flashes the wrong theme
+ * or sidebar width. Keep in sync with applyTheme below.
+ */
+export const themeInitScript = `(function(){try{var p=localStorage.getItem("${THEME_STORAGE_KEY}")||"system";var d=p==="dark"||(p==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.classList.toggle("dark",d);r.dataset.theme=d?"dark":"light";if(localStorage.getItem("${SIDEBAR_STORAGE_KEY}")==="1")r.style.setProperty("--sidebar-width","72px");}catch(e){}})();`
+
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined)
 
-function applyTheme(theme: Theme) {
-  if (typeof document === "undefined") return
-  const root = document.documentElement
-  
-  if (theme === "dark") {
-    root.classList.add("dark")
-  } else {
-    root.classList.remove("dark")
-  }
-  
-  root.setAttribute("data-theme", theme)
+const DARK_QUERY = "(prefers-color-scheme: dark)"
+
+function subscribeSystem(callback: () => void) {
+  const media = window.matchMedia(DARK_QUERY)
+  media.addEventListener("change", callback)
+  return () => media.removeEventListener("change", callback)
 }
 
-function getInitialTheme(): Theme {
-  if (typeof window === "undefined") return "light"
-  
-  // Check localStorage first
-  const stored = localStorage.getItem("theme")
-  if (stored === "dark" || stored === "light") {
-    return stored
-  }
-  
-  // Fall back to system preference
-  if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
-    return "dark"
-  }
-  
-  return "light"
+function applyTheme(theme: ResolvedTheme) {
+  const root = document.documentElement
+  root.classList.toggle("dark", theme === "dark")
+  root.dataset.theme = theme
+}
+
+function toPreference(value: string): ThemePreference {
+  return value === "light" || value === "dark" ? value : "system"
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("light")
-  const [mounted, setMounted] = useState(false)
+  const hydrated = useHydrated()
+  const [stored, setStored] = useStoredValue(THEME_STORAGE_KEY, "system")
+  const systemDark = useSyncExternalStore(subscribeSystem, () => window.matchMedia(DARK_QUERY).matches, () => false)
 
-  // Initialize theme on mount
+  const preference = toPreference(stored)
+  const theme: ResolvedTheme = preference === "system" ? (systemDark ? "dark" : "light") : preference
+
   useEffect(() => {
-    const initialTheme = getInitialTheme()
-    setTheme(initialTheme)
-    applyTheme(initialTheme)
-    setMounted(true)
-  }, [])
+    // The <head> script painted the correct theme already; wait for client values before touching it.
+    if (hydrated) applyTheme(theme)
+  }, [theme, hydrated])
 
-  // Apply theme changes
-  useEffect(() => {
-    if (!mounted) return
-    applyTheme(theme)
-    if (typeof window !== "undefined") {
-      localStorage.setItem("theme", theme)
-    }
-  }, [theme, mounted])
-
-  const value = useMemo(
+  const value = useMemo<ThemeContextValue>(
     () => ({
+      preference,
       theme,
-      toggleTheme: () => setTheme((current) => (current === "dark" ? "light" : "dark")),
+      setPreference: (p) => setStored(p),
+      toggleTheme: () => setStored(theme === "dark" ? "light" : "dark"),
     }),
-    [theme]
+    [preference, theme, setStored]
   )
 
-  // Always provide context, even before mount
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }
 
 export function useTheme() {
   const context = useContext(ThemeContext)
-  if (!context) {
-    throw new Error("useTheme must be used within ThemeProvider")
-  }
+  if (!context) throw new Error("useTheme must be used within ThemeProvider")
   return context
 }

@@ -1,16 +1,15 @@
-import Link from "next/link"
+import { DEVELOPER_CREDIT } from "@/lib/constants"
 
-const WHATSAPP_URL = "https://wa.me/919003078610?text=Hi%20Taheri%20Developers"
-
+/** Developer credit. Desktop only: on phones the credit lives in the "More" drawer so it never covers the tab bar. */
 export function Watermark() {
   return (
-    <Link
-      href={WHATSAPP_URL}
+    <a
+      href={DEVELOPER_CREDIT.href}
       target="_blank"
       rel="noreferrer"
-      className="fixed bottom-3 right-3 z-50 rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-indigo-600 shadow-lg transition hover:bg-indigo-600 hover:text-white"
+      className="no-print fixed bottom-4 right-4 z-(--z-sticky) hidden rounded-full border border-border bg-surface/90 px-3 py-1 text-[11px] font-medium text-subtle-foreground shadow-sm backdrop-blur transition-colors hover:border-primary/40 hover:text-primary md:block"
     >
-      Taheri Developers
-    </Link>
+      {DEVELOPER_CREDIT.label}
+    </a>
   )
 }

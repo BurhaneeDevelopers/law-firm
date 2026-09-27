@@ -1,202 +1,248 @@
 "use client"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useState } from "react"
-import {
-  LayoutDashboard, Briefcase, Users, FileText, Calendar,
-  Bell, Bot, Settings, ChevronLeft, ChevronRight, LogOut,
-  Scale, ShieldCheck
-} from "lucide-react"
-import { cn, getInitials, getAvatarColor } from "@/lib/utils"
-import { demoLawyer } from "@/lib/demo-data"
+import { useEffect, useState } from "react"
+import * as DialogPrimitive from "@radix-ui/react-dialog"
+import { Menu, PanelLeftClose, PanelLeftOpen, Scale, X } from "lucide-react"
+import { cn, todayISO } from "@/lib/utils"
+import { DEVELOPER_CREDIT, OPEN_STATUSES } from "@/lib/constants"
+import { useDB, type DB } from "@/lib/store"
+import { useHydrated } from "@/lib/use-hydrated"
+import { useStoredValue } from "@/lib/use-stored-value"
+import { SIDEBAR_STORAGE_KEY } from "@/lib/theme"
+import { Avatar, Tooltip } from "@/components/ui/misc"
+import { isActive, mobileTabs, navGroups, settingsItem, type NavItem } from "./nav-config"
+import { QuickAddMenu } from "./quick-add"
 
-const WHATSAPP_URL = "https://wa.me/919003078610?text=Hi%20Taheri%20Developers"
+function useCounts(db: DB) {
+  const hydrated = useHydrated()
+  if (!hydrated) return {} as Record<string, number>
+  const today = todayISO()
+  return {
+    hearingsToday: db.hearings.filter((h) => h.date === today).length,
+    urgentOpen: db.cases.filter((c) => c.priority === "Urgent" && OPEN_STATUSES.includes(c.status)).length,
+    draftNotices: db.notices.filter((n) => n.status === "Draft").length,
+  } as Record<string, number>
+}
 
-const navGroups = [
-  {
-    label: "Main",
-    items: [
-      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/cases", label: "Cases", icon: Briefcase, badge: 5 },
-      { href: "/clients", label: "Clients", icon: Users },
-    ]
-  },
-  {
-    label: "Work",
-    items: [
-      { href: "/documents", label: "Documents", icon: FileText },
-      { href: "/calendar", label: "Calendar", icon: Calendar, badge: 3 },
-      { href: "/notices", label: "Notices", icon: Bell },
-    ]
-  },
-  {
-    label: "Intelligence",
-    items: [
-      { href: "/ai-assistant", label: "AI Assistant", icon: Bot },
-      { href: "/citation-check", label: "Citation Check", icon: ShieldCheck },
-      { href: "/settings", label: "Settings", icon: Settings },
-    ]
-  }
-]
+function NavLink({ item, active, collapsed, count, onNavigate }: { item: NavItem; active: boolean; collapsed?: boolean; count?: number; onNavigate?: () => void }) {
+  const link = (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "group relative flex h-9 items-center gap-3 rounded-[10px] px-2.5 text-sm font-medium transition-colors",
+        active ? "bg-primary-soft text-primary-soft-foreground" : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
+        collapsed && "justify-center px-0"
+      )}
+    >
+      <item.icon className={cn("size-[18px] shrink-0", active ? "text-primary" : "text-subtle-foreground group-hover:text-foreground")} strokeWidth={1.9} />
+      {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+      {!collapsed && count ? (
+        <span className={cn("tabular rounded-md px-1.5 text-[11px] font-semibold leading-5", active ? "bg-primary/15" : "bg-surface-3 text-muted-foreground")}>
+          {count}
+        </span>
+      ) : null}
+      {collapsed && count ? <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-accent" aria-hidden /> : null}
+    </Link>
+  )
+  return collapsed ? <Tooltip content={count ? `${item.label} (${count})` : item.label}>{link}</Tooltip> : link
+}
 
-export function Sidebar() {
-  const pathname = usePathname()
-  const [collapsed, setCollapsed] = useState(false)
-  const lawyer = demoLawyer
-
+function NavList({ pathname, collapsed, counts, onNavigate }: { pathname: string; collapsed?: boolean; counts: Record<string, number>; onNavigate?: () => void }) {
   return (
     <>
-      {/* Desktop Sidebar */}
-      <aside
-        className={cn(
-          "hidden md:flex flex-col fixed left-0 top-0 h-full bg-white z-40 transition-all duration-300",
-          collapsed ? "w-[72px]" : "w-[260px]"
-        )}
-      >
-        {/* Logo */}
-        <div className={cn("flex items-center gap-3 px-4 py-5", collapsed && "justify-center px-3")}>
-          <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center shrink-0">
-            <Scale className="w-5 h-5 text-white" />
-          </div>
-          {!collapsed && (
-            <div>
-              <p className="text-sm font-bold text-gray-900 leading-tight">Yadav & Associates</p>
-              <p className="text-xs text-gray-500">Law Management</p>
-            </div>
+      {navGroups.map((group) => (
+        <div key={group.label} className="mb-5">
+          {!collapsed ? (
+            <p className="mb-1.5 px-2.5 text-xs font-medium text-subtle-foreground">{group.label}</p>
+          ) : (
+            <div className="mx-auto mb-2 h-px w-6 bg-border" />
           )}
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className={cn(
-              "ml-auto w-6 h-6 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors",
-              collapsed && "ml-0"
-            )}
-          >
-            {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
-          </button>
-        </div>
-
-        {/* Nav */}
-        <nav className="flex-1 overflow-y-auto py-4 px-3">
-          {navGroups.map((group) => (
-            <div key={group.label} className="mb-5">
-              {!collapsed && (
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-3 mb-2">
-                  {group.label}
-                </p>
-              )}
-              {group.items.map((item) => {
-                const active = pathname.startsWith(item.href)
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    title={collapsed ? item.label : undefined}
-                    className={cn(
-                      "flex items-center gap-3 px-3 py-2.5 rounded-xl mb-0.5 text-sm font-medium transition-all group relative",
-                      active
-                        ? "bg-indigo-50 text-indigo-700"
-                        : "text-gray-700 hover:bg-gray-50 hover:text-gray-900",
-                      collapsed && "justify-center px-0"
-                    )}
-                  >
-                    <item.icon className={cn("w-5 h-5 shrink-0", active ? "text-indigo-600" : "text-gray-500 group-hover:text-gray-700")} />
-                    {!collapsed && <span className="flex-1">{item.label}</span>}
-                    {!collapsed && item.badge && (
-                      <span className="bg-amber-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                        {item.badge}
-                      </span>
-                    )}
-                    {collapsed && item.badge && (
-                      <span className="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full" />
-                    )}
-                  </Link>
-                )
-              })}
-            </div>
-          ))}
-        </nav>
-
-        <div className="px-3 pb-1">
-          <Link
-            href={WHATSAPP_URL}
-            target="_blank"
-            rel="noreferrer"
-            className={cn(
-              "block rounded-xl bg-indigo-50 px-2 py-1 text-center text-[10px] font-semibold text-indigo-700 hover:bg-indigo-100 transition",
-              collapsed && "text-[9px]"
-            )}
-          >
-            Taheri Developers
-          </Link>
-        </div>
-
-        {/* User */}
-        <div className={cn("p-3", collapsed && "px-2")}>
-          <div className={cn("flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer", collapsed && "justify-center")}>
-            <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0", getAvatarColor(lawyer.name))}>
-              {getInitials(lawyer.name)}
-            </div>
-            {!collapsed && (
-              <>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">Adv. {lawyer.name}</p>
-                  <p className="text-xs text-gray-500 truncate">Senior Advocate</p>
-                </div>
-                <button className="text-gray-400 hover:text-rose-500 transition-colors">
-                  <LogOut className="w-4 h-4" />
-                </button>
-              </>
-            )}
+          <div className="space-y-0.5">
+            {group.items.map((item) => (
+              <NavLink
+                key={item.href}
+                item={item}
+                active={isActive(pathname, item.href)}
+                collapsed={collapsed}
+                count={item.countKey ? counts[item.countKey] : undefined}
+                onNavigate={onNavigate}
+              />
+            ))}
           </div>
         </div>
-      </aside>
-
-      {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white z-40 px-2 pb-safe">
-        <div className="flex items-center justify-around py-2">
-          {[
-            { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-            { href: "/cases", label: "Cases", icon: Briefcase },
-            { href: "/clients", label: "Clients", icon: Users },
-            { href: "/calendar", label: "Calendar", icon: Calendar },
-          ].map((item) => {
-            const active = pathname.startsWith(item.href)
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-colors",
-                  active ? "text-indigo-600" : "text-gray-500"
-                )}
-              >
-                <item.icon className="w-5 h-5" />
-                <span className="text-[10px] font-medium">{item.label}</span>
-              </Link>
-            )
-          })}
-          <Link
-            href="/ai-assistant"
-            className={cn(
-              "flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-colors",
-              pathname.startsWith("/ai-assistant") ? "text-indigo-600" : "text-gray-500"
-            )}
-          >
-            <Bot className="w-5 h-5" />
-            <span className="text-[10px] font-medium">AI</span>
-          </Link>
-        </div>
-        <div className="pb-1 text-center">
-          <Link
-            href={WHATSAPP_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="text-[10px] font-semibold text-indigo-600"
-          >
-            Taheri Developers
-          </Link>
-        </div>
-      </nav>
+      ))}
     </>
   )
 }
+
+function Brand({ collapsed, firm }: { collapsed?: boolean; firm: string }) {
+  return (
+    <Link href="/dashboard" className="flex min-w-0 items-center gap-2.5" aria-label="Go to Today">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+        <Scale className="size-[18px]" strokeWidth={2} />
+      </span>
+      {!collapsed && (
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-semibold leading-tight text-foreground">{firm}</span>
+          <span className="block text-xs text-subtle-foreground">LexFirm</span>
+        </span>
+      )}
+    </Link>
+  )
+}
+
+function UserCard({ collapsed, name, title, onNavigate }: { collapsed?: boolean; name: string; title: string; onNavigate?: () => void }) {
+  return (
+    <Link
+      href="/settings"
+      onClick={onNavigate}
+      className={cn("flex items-center gap-2.5 rounded-xl p-2 transition-colors hover:bg-surface-2", collapsed && "justify-center")}
+    >
+      <Avatar name={name} size="sm" />
+      {!collapsed && (
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-foreground">Adv. {name}</span>
+          <span className="block truncate text-xs text-subtle-foreground">{title}</span>
+        </span>
+      )}
+    </Link>
+  )
+}
+
+function Credit({ className }: { className?: string }) {
+  return (
+    <a
+      href={DEVELOPER_CREDIT.href}
+      target="_blank"
+      rel="noreferrer"
+      className={cn("block text-center text-[11px] font-medium text-subtle-foreground transition-colors hover:text-primary", className)}
+    >
+      Built by {DEVELOPER_CREDIT.label}
+    </a>
+  )
+}
+
+export function Sidebar() {
+  const pathname = usePathname()
+  const db = useDB()
+  const counts = useCounts(db)
+  const [collapsedValue, setCollapsedValue] = useStoredValue(SIDEBAR_STORAGE_KEY, "0")
+  const collapsed = collapsedValue === "1"
+  const hydrated = useHydrated()
+  const [moreOpen, setMoreOpen] = useState(false)
+
+  useEffect(() => {
+    if (hydrated) document.documentElement.style.setProperty("--sidebar-width", collapsed ? "72px" : "248px")
+  }, [collapsed, hydrated])
+
+  const toggle = () => setCollapsedValue(collapsed ? "0" : "1")
+
+  const { lawyer } = db
+
+  return (
+    <>
+      {/* Desktop */}
+      <aside
+        aria-label="Main navigation"
+        className={cn(
+          // Width comes from --sidebar-width, which the <head> script sets before paint.
+          "fixed inset-y-0 left-0 z-(--z-nav) hidden w-(--sidebar-width) flex-col overflow-hidden border-r border-border bg-surface transition-[width] duration-300 ease-out-soft md:flex"
+        )}
+      >
+        <div className={cn("flex h-16 items-center gap-2 px-4", collapsed && "justify-center px-0")}>
+          <Brand collapsed={collapsed} firm={lawyer.firm_name} />
+        </div>
+
+        <nav className={cn("flex-1 overflow-y-auto px-3 pt-2", collapsed && "px-3")}>
+          <NavList pathname={pathname} collapsed={collapsed} counts={counts} />
+        </nav>
+
+        <div className="space-y-1 border-t border-border p-3">
+          <NavLink item={settingsItem} active={isActive(pathname, settingsItem.href)} collapsed={collapsed} />
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className={cn(
+              "flex h-9 w-full items-center gap-3 rounded-[10px] px-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground",
+              collapsed && "justify-center px-0"
+            )}
+          >
+            {collapsed ? <PanelLeftOpen className="size-[18px]" /> : <PanelLeftClose className="size-[18px]" />}
+            {!collapsed && "Collapse"}
+          </button>
+          <UserCard collapsed={collapsed} name={lawyer.name} title={lawyer.title} />
+        </div>
+      </aside>
+
+      {/* Mobile bottom bar */}
+      <nav
+        aria-label="Main navigation"
+        className="fixed inset-x-0 bottom-0 z-(--z-nav) border-t border-border bg-surface/95 backdrop-blur-md md:hidden"
+      >
+        <div className="grid grid-cols-5 items-end px-1 pb-safe pt-1.5">
+          {mobileTabs.slice(0, 2).map((item) => (
+            <MobileTab key={item.href} item={item} active={isActive(pathname, item.href)} count={item.href === "/calendar" ? counts.hearingsToday : undefined} />
+          ))}
+          <div className="flex justify-center pb-1">
+            <QuickAddMenu variant="fab" />
+          </div>
+          <MobileTab item={mobileTabs[2]} active={isActive(pathname, mobileTabs[2].href)} />
+          <button
+            type="button"
+            onClick={() => setMoreOpen(true)}
+            className="flex flex-col items-center gap-0.5 py-1 text-[11px] font-medium text-muted-foreground"
+          >
+            <Menu className="size-[22px]" strokeWidth={1.8} />
+            More
+          </button>
+        </div>
+      </nav>
+
+      {/* Mobile "More" drawer: every module stays reachable on a phone */}
+      <DialogPrimitive.Root open={moreOpen} onOpenChange={setMoreOpen}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="fixed inset-0 z-(--z-overlay) bg-overlay animate-overlay-in md:hidden" />
+          <DialogPrimitive.Content className="fixed inset-x-0 bottom-0 z-(--z-overlay) max-h-[85dvh] overflow-y-auto rounded-t-3xl border-t border-border bg-surface px-4 pb-safe pt-3 shadow-lg animate-rise md:hidden">
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-surface-3" />
+            <div className="mb-4 flex items-center justify-between">
+              <DialogPrimitive.Title className="text-base font-semibold text-foreground">All modules</DialogPrimitive.Title>
+              <DialogPrimitive.Description className="sr-only">Navigate to any section</DialogPrimitive.Description>
+              <DialogPrimitive.Close aria-label="Close" className="flex size-8 items-center justify-center rounded-lg text-subtle-foreground hover:bg-surface-2">
+                <X className="size-4" />
+              </DialogPrimitive.Close>
+            </div>
+            <NavList pathname={pathname} counts={counts} onNavigate={() => setMoreOpen(false)} />
+            <div className="space-y-1 border-t border-border pt-3">
+              <NavLink item={settingsItem} active={isActive(pathname, settingsItem.href)} onNavigate={() => setMoreOpen(false)} />
+              <UserCard name={lawyer.name} title={lawyer.title} onNavigate={() => setMoreOpen(false)} />
+              <Credit className="py-3" />
+            </div>
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+    </>
+  )
+}
+
+function MobileTab({ item, active, count }: { item: NavItem; active: boolean; count?: number }) {
+  return (
+    <Link
+      href={item.href}
+      aria-current={active ? "page" : undefined}
+      className={cn("relative flex flex-col items-center gap-0.5 py-1 text-[11px] font-medium", active ? "text-primary" : "text-muted-foreground")}
+    >
+      <item.icon className="size-[22px]" strokeWidth={active ? 2.1 : 1.8} />
+      {item.label}
+      {count ? (
+        <span className="tabular absolute right-[22%] top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-accent-foreground">
+          {count}
+        </span>
+      ) : null}
+    </Link>
+  )
+}
+

@@ -1,5 +1,8 @@
 "use client"
 // Citation verification store (simulates Supabase citation_verifications table)
+import { subDays } from "date-fns"
+
+const daysAgoISO = (days: number) => subDays(new Date(), days).toISOString()
 
 export interface CitationResult {
   raw_text: string
@@ -44,7 +47,7 @@ const demoCitationVerifications: CitationVerification[] = [
     case_id: "case-11",
     document_type: "Bail Application",
     document_text: "In the matter of bail under NDPS Act...",
-    title: "NDPS Bail Application — Dharam Singh",
+    title: "NDPS Bail Application - Dharam Singh",
     results: [
       {
         raw_text: "Tofan Singh vs State of Tamil Nadu (2021) 4 SCC 1",
@@ -97,7 +100,7 @@ const demoCitationVerifications: CitationVerification[] = [
     citations_verified: 2,
     citations_flagged: 1,
     citations_hallucinated: 0,
-    created_at: "2026-05-06T14:00:00Z"
+    created_at: daysAgoISO(1)
   },
   {
     id: "cv-2",
@@ -105,7 +108,7 @@ const demoCitationVerifications: CitationVerification[] = [
     case_id: "case-1",
     document_type: "Written Submission",
     document_text: "Written submissions in CRL/204/2024...",
-    title: "Written Submissions — Sharma Cheating Case",
+    title: "Written Submissions - Sharma Cheating Case",
     results: [
       {
         raw_text: "Arnesh Kumar vs State of Bihar (2014) 8 SCC 273",
@@ -159,7 +162,7 @@ const demoCitationVerifications: CitationVerification[] = [
     citations_verified: 3,
     citations_flagged: 0,
     citations_hallucinated: 0,
-    created_at: "2026-05-05T10:30:00Z"
+    created_at: daysAgoISO(2)
   },
   {
     id: "cv-3",
@@ -167,7 +170,7 @@ const demoCitationVerifications: CitationVerification[] = [
     case_id: "case-3",
     document_type: "Petition",
     document_text: "Writ petition challenging land acquisition...",
-    title: "Land Acquisition Writ — Hooda vs HUDA",
+    title: "Land Acquisition Writ - Hooda vs HUDA",
     results: [
       {
         raw_text: "Inderjit Barua vs State of Assam (1983) 2 SCC 91",
@@ -218,7 +221,7 @@ const demoCitationVerifications: CitationVerification[] = [
     citations_verified: 1,
     citations_flagged: 1,
     citations_hallucinated: 1,
-    created_at: "2026-05-04T16:00:00Z"
+    created_at: daysAgoISO(3)
   },
   {
     id: "cv-4",
@@ -265,7 +268,7 @@ const demoCitationVerifications: CitationVerification[] = [
     citations_verified: 2,
     citations_flagged: 0,
     citations_hallucinated: 0,
-    created_at: "2026-05-03T09:15:00Z"
+    created_at: daysAgoISO(4)
   },
   {
     id: "cv-5",
@@ -273,7 +276,7 @@ const demoCitationVerifications: CitationVerification[] = [
     case_id: "case-8",
     document_type: "Written Submission",
     document_text: "In the matter of custody...",
-    title: "Custody Arguments — Preeti Garg",
+    title: "Custody Arguments - Preeti Garg",
     results: [
       {
         raw_text: "Gaurav Nagpal vs Sumedha Nagpal (2009) 1 SCC 42",
@@ -297,7 +300,7 @@ const demoCitationVerifications: CitationVerification[] = [
     citations_verified: 1,
     citations_flagged: 0,
     citations_hallucinated: 0,
-    created_at: "2026-05-02T11:00:00Z"
+    created_at: daysAgoISO(6)
   }
 ]
 

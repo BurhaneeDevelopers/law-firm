@@ -1,568 +1,512 @@
 "use client"
-import { useState, use } from "react"
-import { useRouter } from "next/navigation"
+import { use, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import {
-  ArrowLeft, Flag, Edit2, Save, X, Plus, MessageSquare, Phone,
-  FileText, Clock, Paperclip, Sparkles, Pin, Trash2, Download,
-  ChevronRight, Calendar, Users, Check, AlertCircle
+  AlarmClock, Briefcase, CalendarDays, CalendarPlus, Check, Copy, Download, Ellipsis, ExternalLink, FileText, Gavel,
+  NotebookPen, Pencil, Phone, Pin, PinOff, Plus, ScrollText, Sparkles, Trash2, Upload,
 } from "lucide-react"
-import { cn, caseTypeColors, statusColors, formatDate, formatRelativeTime, getDaysUntil, getCountdownClass, getCountdownLabel, getInitials, getAvatarColor } from "@/lib/utils"
-import {
-  getCase, getClient, getHearingsForCase, getDocumentsForCase,
-  getNotesForCase, getNoticesForCase, updateCase, addNote, updateNote, deleteNote,
-  addHearing, getCases, getClients
-} from "@/lib/store"
-import { callGemini } from "@/lib/gemini"
+import { Button } from "@/components/ui/button"
+import { Card, CardHeader, DetailRow } from "@/components/ui/card"
+import { Badge, CaseTypeTag, CountdownBadge, StatusBadge, UrgentBadge } from "@/components/ui/badge"
+import { Input, Textarea } from "@/components/ui/field"
+import { Avatar, EmptyState, PageHeader } from "@/components/ui/misc"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Dropdown, DropdownContent, DropdownItem, DropdownSeparator, DropdownTrigger } from "@/components/ui/dropdown"
 import { useToast } from "@/components/ui/toast"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
-
-const TABS = ["Overview", "Hearings", "Documents", "Notes", "Notices", "AI Summary"]
+import { RecordOutcomeSheet } from "@/components/practice/record-outcome-sheet"
+import { AddHearingDialog } from "@/components/practice/add-hearing-dialog"
+import { UploadDialog } from "@/components/practice/upload-dialog"
+import { WhatsAppMenu } from "@/components/practice/whatsapp-menu"
+import { AIText } from "@/components/practice/ai-text"
+import { purposeTone } from "@/lib/constants"
+import {
+  cn, formatDate, formatINR, formatRelativeTime, formatTime, getDaysUntil, hearingReminderMessage, todayISO,
+} from "@/lib/utils"
+import {
+  addDeadline, addNote, deleteCase, deleteDeadline, deleteDocument, deleteHearing, deleteNote, getCaseFees, getNextHearing,
+  sortHearings, uid, updateNote, useDB, type Hearing,
+} from "@/lib/store"
+import { callGemini } from "@/lib/gemini"
+import { CaseEditSheet } from "./case-edit-sheet"
+import { CaseFees } from "./case-fees"
 
 export default function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
+  const db = useDB()
   const { toast } = useToast()
   const { confirm, dialogElement } = useConfirmDialog()
-  const [activeTab, setActiveTab] = useState("Overview")
-  const [editMode, setEditMode] = useState(false)
+
+  const [tab, setTab] = useState("overview")
+  const [editOpen, setEditOpen] = useState(false)
+  const [outcomeFor, setOutcomeFor] = useState<Hearing | null>(null)
+  const [hearingOpen, setHearingOpen] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [newNote, setNewNote] = useState("")
+  const [deadline, setDeadline] = useState({ title: "", due_date: "" })
   const [aiLoading, setAiLoading] = useState(false)
   const [aiSummary, setAiSummary] = useState("")
-  const [showAddHearing, setShowAddHearing] = useState(false)
-  const [newNote, setNewNote] = useState("")
+  const [copied, setCopied] = useState(false)
 
-  const caseData = getCase(id)
-  const [formData, setFormData] = useState(caseData || {})
+  const caseData = db.cases.find((c) => c.id === id)
 
   if (!caseData) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <AlertCircle className="w-12 h-12 text-slate-300 mb-4" />
-        <h2 className="text-lg font-semibold text-slate-700">Case Not Found</h2>
-        <p className="text-sm text-slate-500 mt-1">This case does not exist or has been deleted.</p>
-        <Link href="/cases" className="mt-4 text-sm text-indigo-600 hover:text-indigo-700 font-medium">← Back to Cases</Link>
-      </div>
+      <EmptyState
+        icon={Briefcase}
+        title="Case not found"
+        description="It may have been deleted, or the link is incorrect."
+        action={<Button asChild variant="outline"><Link href="/cases">Back to cases</Link></Button>}
+      />
     )
   }
 
-  const client = getClient(caseData.client_id)
-  const hearings = getHearingsForCase(id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-  const documents = getDocumentsForCase(id)
-  const notes = getNotesForCase(id).sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
-  const notices = getNoticesForCase(id)
+  const client = db.clients.find((c) => c.id === caseData.client_id)
+  const hearings = db.hearings.filter((h) => h.case_id === id)
+  const upcoming = sortHearings(hearings.filter((h) => getDaysUntil(h.date) >= 0))
+  const past = sortHearings(hearings.filter((h) => getDaysUntil(h.date) < 0), "desc")
+  const nextHearing = getNextHearing(id, db.hearings)
+  const needsOutcome = [...past, ...upcoming.filter((h) => getDaysUntil(h.date) === 0)].find((h) => !h.outcome)
+  const documents = db.documents.filter((d) => d.case_id === id)
+  const notes = db.notes.filter((n) => n.case_id === id).sort((a, b) => Number(b.is_pinned) - Number(a.is_pinned) || b.created_at.localeCompare(a.created_at))
+  const notices = db.notices.filter((n) => n.case_id === id)
+  const deadlines = db.deadlines.filter((d) => d.case_id === id).sort((a, b) => a.due_date.localeCompare(b.due_date))
+  const fees = getCaseFees(id, db)
 
-  const nextHearing = hearings.find(h => new Date(h.date) >= new Date())
-  const daysToNextHearing = nextHearing ? getDaysUntil(nextHearing.date) : null
+  const copyCnr = async () => {
+    try {
+      await navigator.clipboard.writeText(caseData.cnr_number)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      toast("Could not copy. Select the number and copy it manually.", "error")
+    }
+  }
 
-  const handleSave = () => {
-    updateCase(id, formData as any)
-    toast("Case updated", "success")
-    setEditMode(false)
+  const handleAddNote = () => {
+    if (!newNote.trim()) return
+    addNote({ id: uid("note"), case_id: id, content: newNote.trim(), is_pinned: false, created_by: `Adv. ${db.lawyer.name}`, created_at: new Date().toISOString() })
+    setNewNote("")
+    toast("Note added", "success")
+  }
+
+  const handleAddDeadline = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!deadline.title.trim() || !deadline.due_date) {
+      toast("Enter what is due and the date", "error")
+      return
+    }
+    addDeadline({ id: uid("dl"), case_id: id, title: deadline.title.trim(), due_date: deadline.due_date, case_number: caseData.case_number, client: client?.full_name ?? "" })
+    setDeadline({ title: "", due_date: "" })
+    toast("Deadline added", "success")
   }
 
   const handleAISummary = async () => {
     setAiLoading(true)
-    const prompt = `Summarize this case for Advocate Mahipal Yadav:
+    const prompt = `Summarise this case for Advocate ${db.lawyer.name}:
 Case: ${caseData.title}
-Number: ${caseData.case_number}
+Number: ${caseData.case_number}${caseData.cnr_number ? ` (CNR ${caseData.cnr_number})` : ""}
 Type: ${caseData.case_type}
-Court: ${caseData.court}
-Judge: ${caseData.judge}
+Court: ${caseData.court}, ${caseData.judge}
 Status: ${caseData.status}
-Opposing Party: ${caseData.opposing_party}
-Filing Date: ${caseData.filing_date}
-Description: ${caseData.description}
-Hearings: ${hearings.length} total, ${hearings.filter(h => new Date(h.date) >= new Date()).length} upcoming
-Documents: ${documents.length} files
-Notes: ${notes.map(n => n.content).join("; ")}
+Opposite party: ${caseData.opposing_party}
+Filed: ${caseData.filing_date}
+Facts: ${caseData.description}
+Past hearings: ${past.map((h) => `${h.date} ${h.purpose}${h.outcome ? ` (${h.outcome}: ${h.outcome_notes})` : ""}`).join("; ") || "none"}
+Next date: ${nextHearing ? `${nextHearing.date} for ${nextHearing.purpose}` : "not listed"}
+Notes: ${notes.map((n) => n.content).join("; ") || "none"}
 
-Provide a structured summary with: Case Overview, Key Dates, Current Status, Risk Flags, Suggested Next Steps.`
+Give: Case overview, Key dates, Current stage, Risk flags, Suggested next steps.`
     const result = await callGemini(prompt)
     setAiSummary(result)
     setAiLoading(false)
   }
 
-  const handleAddNote = () => {
-    if (!newNote.trim()) return
-    addNote({
-      id: `note-${Date.now()}`,
-      case_id: id,
-      content: newNote,
-      is_pinned: false,
-      created_by: "Adv. Mahipal Yadav",
-      created_at: new Date().toISOString(),
-    })
-    setNewNote("")
-    toast("Note added", "success")
-  }
+  const reminder = (h: Hearing) => (lang: "English" | "Hindi") =>
+    hearingReminderMessage(
+      { clientName: client?.full_name ?? "", caseNumber: caseData.case_number, date: h.date, time: h.time, court: h.court_room, lawyerName: db.lawyer.name },
+      lang
+    )
 
-  const [hearingForm, setHearingForm] = useState({ date: "", time: "", court_room: caseData.court, purpose: "Argument", outcome_notes: "" })
-
-  const handleAddHearing = () => {
-    if (!hearingForm.date || !hearingForm.time) { toast("Date and time required", "error"); return }
-    addHearing({
-      id: `h-${Date.now()}`,
-      case_id: id,
-      ...hearingForm,
-      reminder_sent: false,
-    })
-    setShowAddHearing(false)
-    toast("Hearing added", "success")
-    setHearingForm({ date: "", time: "", court_room: caseData.court, purpose: "Argument", outcome_notes: "" })
+  const renderHearing = (h: Hearing) => {
+    const days = getDaysUntil(h.date)
+    const isPastOrToday = days <= 0
+    return (
+      <li key={h.id} className="relative pb-5 pl-7 last:pb-0">
+        <span className={cn("absolute left-[5px] top-2 size-2.5 rounded-full ring-4 ring-surface", days >= 0 ? "bg-primary" : h.outcome ? "bg-success" : "bg-warning")} aria-hidden />
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold text-foreground">
+              {formatDate(h.date, "EEE, dd MMM yyyy")} <span className="font-normal text-muted-foreground">· {formatTime(h.time)}</span>
+            </p>
+            <p className="mt-0.5 text-[13px] text-muted-foreground">
+              {h.court_room}
+              {h.item_no ? ` · Item ${h.item_no}` : ""}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge tone={purposeTone[h.purpose] ?? "neutral"}>{h.purpose}</Badge>
+            {days >= 0 && <CountdownBadge days={days} />}
+          </div>
+        </div>
+        {h.outcome && (
+          <div className="mt-2 rounded-lg bg-surface-2 px-3 py-2 text-[13px]">
+            <span className="font-medium text-foreground">{h.outcome}.</span>{" "}
+            <span className="text-muted-foreground">{h.outcome_notes}</span>
+          </div>
+        )}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {isPastOrToday && (
+            <Button size="xs" variant={h.outcome ? "ghost" : "soft"} onClick={() => setOutcomeFor(h)}>
+              <Gavel /> {h.outcome ? "Edit outcome" : "Record outcome"}
+            </Button>
+          )}
+          {days >= 0 && client && (
+            <WhatsAppMenu size="xs" variant="outline" label={h.reminder_sent ? "Remind again" : "Remind client"} phone={client.phone} preferred={client.preferred_language} message={reminder(h)} />
+          )}
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => confirm("Delete this hearing?", `${formatDate(h.date)} (${h.purpose}) will be removed from the diary.`, () => { deleteHearing(h.id); toast("Hearing removed", "success") })}
+          >
+            <Trash2 /> Delete
+          </Button>
+        </div>
+      </li>
+    )
   }
 
   return (
-    <div className="max-w-7xl mx-auto animate-fade-in">
+    <div className="space-y-6">
       {dialogElement}
 
-      {/* Back */}
-      <div className="flex items-center gap-2 mb-4">
-        <button onClick={() => router.back()} className="p-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-500">
-          <ArrowLeft className="w-4 h-4" />
-        </button>
-        <span className="text-xs text-slate-400">Cases</span>
-        <ChevronRight className="w-3 h-3 text-slate-300" />
-        <span className="text-xs text-slate-500 truncate max-w-xs">{caseData.case_number}</span>
-      </div>
+      <PageHeader
+        back={{ href: "/cases", label: "Cases" }}
+        title={caseData.title}
+        description={
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <span className="font-mono text-[13px] text-foreground">{caseData.case_number}</span>
+            {caseData.cnr_number && (
+              <button type="button" onClick={copyCnr} className="inline-flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-foreground" title="Copy CNR number">
+                CNR {caseData.cnr_number} {copied ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
+              </button>
+            )}
+            <CaseTypeTag type={caseData.case_type} />
+            <StatusBadge status={caseData.status} />
+            {caseData.priority === "Urgent" && <UrgentBadge />}
+          </span>
+        }
+        actions={
+          <>
+            {needsOutcome && (
+              <Button onClick={() => setOutcomeFor(needsOutcome)}><Gavel /> Record outcome</Button>
+            )}
+            <Button variant={needsOutcome ? "outline" : "primary"} onClick={() => setHearingOpen(true)}><CalendarPlus /> Add hearing</Button>
+            <Button variant="outline" onClick={() => setEditOpen(true)}><Pencil /> Edit</Button>
+            <Dropdown>
+              <DropdownTrigger asChild>
+                <Button variant="outline" size="icon" aria-label="More actions"><Ellipsis /></Button>
+              </DropdownTrigger>
+              <DropdownContent className="w-52">
+                <DropdownItem onSelect={() => setUploadOpen(true)}><Upload /> Upload document</DropdownItem>
+                <DropdownItem onSelect={() => router.push(`/notices/new?case=${id}`)}><ScrollText /> Draft notice</DropdownItem>
+                <DropdownItem onSelect={() => { setTab("ai"); if (!aiSummary) handleAISummary() }}><Sparkles /> AI summary</DropdownItem>
+                <DropdownSeparator />
+                <DropdownItem
+                  className="text-danger-soft-foreground [&_svg]:text-danger"
+                  onSelect={() =>
+                    confirm("Delete this case?", `${caseData.case_number} and its hearings, notes and deadlines will be removed. This cannot be undone.`, () => {
+                      deleteCase(id)
+                      toast(`${caseData.case_number} deleted`, "success")
+                      router.push("/cases")
+                    }, "Delete case")
+                  }
+                >
+                  <Trash2 /> Delete case
+                </DropdownItem>
+              </DropdownContent>
+            </Dropdown>
+          </>
+        }
+      />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content */}
-        <div className="lg:col-span-2 space-y-5">
-          {/* Case Header */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-            <div className="flex items-start gap-4 justify-between">
-              <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2 mb-3">
-                  <span className={cn("text-xs font-semibold px-2.5 py-1 rounded-full", caseTypeColors[caseData.case_type])}>
-                    {caseData.case_type}
-                  </span>
-                  <span className={cn("text-xs font-semibold px-2.5 py-1 rounded-full", statusColors[caseData.status])}>
-                    {caseData.status}
-                  </span>
-                  {caseData.priority === "Urgent" && (
-                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-100 flex items-center gap-1">
-                      <Flag className="w-3 h-3" /> Urgent
-                    </span>
-                  )}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <Card className="min-w-0 overflow-hidden">
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList>
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="hearings" count={hearings.length}>Hearings</TabsTrigger>
+              <TabsTrigger value="documents" count={documents.length}>Documents</TabsTrigger>
+              <TabsTrigger value="notes" count={notes.length}>Notes</TabsTrigger>
+              <TabsTrigger value="fees">Fees</TabsTrigger>
+              <TabsTrigger value="notices" count={notices.length}>Notices</TabsTrigger>
+              <TabsTrigger value="ai"><Sparkles className="size-3.5" /> AI summary</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="overview" className="space-y-6 p-5">
+              <section>
+                <h2 className="text-sm font-semibold text-foreground">Brief facts</h2>
+                <p className="mt-1.5 max-w-[70ch] text-sm leading-relaxed text-muted-foreground">{caseData.description || "No facts recorded yet. Use Edit to add them."}</p>
+              </section>
+              <dl className="grid gap-x-8 sm:grid-cols-2">
+                <DetailRow label="Court">{caseData.court}</DetailRow>
+                <DetailRow label="Presiding officer">{caseData.judge || "Not recorded"}</DetailRow>
+                <DetailRow label="Opposite party">{caseData.opposing_party || "Not recorded"}</DetailRow>
+                <DetailRow label="Filed on">{formatDate(caseData.filing_date)}</DetailRow>
+                <DetailRow label="Hearings so far">{past.length}</DetailRow>
+                <DetailRow label="Priority">{caseData.priority}</DetailRow>
+              </dl>
+              <section>
+                <div className="flex items-center justify-between">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><AlarmClock className="size-4 text-muted-foreground" /> Deadlines</h2>
                 </div>
-                <h1 className="text-xl font-bold text-slate-900 mb-1">{caseData.title}</h1>
-                <p className="text-sm text-slate-500 font-mono">{caseData.case_number}</p>
-              </div>
-              <div className="flex gap-2">
-                {editMode ? (
-                  <>
-                    <button onClick={handleSave} className="p-2 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors">
-                      <Save className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => setEditMode(false)} className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </>
-                ) : (
-                  <button onClick={() => setEditMode(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 transition-colors">
-                    <Edit2 className="w-4 h-4" />
-                  </button>
+                {deadlines.length > 0 && (
+                  <ul className="mt-3 divide-y divide-border rounded-xl border border-border">
+                    {deadlines.map((d) => (
+                      <li key={d.id} className="flex items-center gap-3 px-4 py-2.5">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-medium text-foreground">{d.title}</p>
+                          <p className="text-xs text-muted-foreground">{formatDate(d.due_date, "EEE, dd MMM yyyy")}</p>
+                        </div>
+                        <CountdownBadge days={getDaysUntil(d.due_date)} />
+                        <Button variant="ghost" size="icon-xs" aria-label="Remove deadline" onClick={() => { deleteDeadline(d.id); toast("Deadline removed", "success") }}>
+                          <Trash2 />
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
                 )}
-              </div>
-            </div>
-          </div>
+                <form onSubmit={handleAddDeadline} className="mt-3 grid gap-2 sm:grid-cols-[1fr_160px_auto]">
+                  <Input aria-label="Deadline" value={deadline.title} onChange={(e) => setDeadline((d) => ({ ...d, title: e.target.value }))} placeholder="e.g. File written statement (30 days)" />
+                  <Input aria-label="Due date" type="date" min={todayISO()} value={deadline.due_date} onChange={(e) => setDeadline((d) => ({ ...d, due_date: e.target.value }))} />
+                  <Button type="submit" variant="outline"><Plus /> Add</Button>
+                </form>
+              </section>
+            </TabsContent>
 
-          {/* Tabs */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="flex overflow-x-auto border-b border-slate-100 px-2">
-              {TABS.map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={cn(
-                    "px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors border-b-2",
-                    activeTab === tab
-                      ? "text-indigo-700 border-indigo-700"
-                      : "text-slate-500 hover:text-slate-700 border-transparent"
+            <TabsContent value="hearings" className="p-5">
+              {hearings.length === 0 ? (
+                <EmptyState icon={CalendarDays} title="No hearings yet" description="Add the first date the court gives." action={<Button size="sm" onClick={() => setHearingOpen(true)}><CalendarPlus /> Add hearing</Button>} />
+              ) : (
+                <div className="space-y-6">
+                  {upcoming.length > 0 && (
+                    <section>
+                      <h3 className="mb-3 text-xs font-medium text-subtle-foreground">Upcoming</h3>
+                      <ol className="relative before:absolute before:bottom-2 before:left-[9px] before:top-2 before:w-px before:bg-border">{upcoming.map(renderHearing)}</ol>
+                    </section>
                   )}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
+                  {past.length > 0 && (
+                    <section>
+                      <h3 className="mb-3 text-xs font-medium text-subtle-foreground">History</h3>
+                      <ol className="relative before:absolute before:bottom-2 before:left-[9px] before:top-2 before:w-px before:bg-border">{past.map(renderHearing)}</ol>
+                    </section>
+                  )}
+                </div>
+              )}
+            </TabsContent>
 
-            <div className="p-6">
-              {/* Overview Tab */}
-              {activeTab === "Overview" && (
-                <div className="grid grid-cols-2 gap-4">
-                  {[
-                    { label: "Case Number", key: "case_number" },
-                    { label: "Filing Date", key: "filing_date" },
-                    { label: "Court", key: "court" },
-                    { label: "Judge", key: "judge" },
-                    { label: "Opposing Party", key: "opposing_party" },
-                    { label: "Priority", key: "priority" },
-                  ].map(f => (
-                    <div key={f.key}>
-                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">{f.label}</p>
-                      {editMode ? (
-                        <input
-                          value={(formData as any)[f.key] || ""}
-                          onChange={e => setFormData((d: any) => ({ ...d, [f.key]: e.target.value }))}
-                          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400"
-                        />
+            <TabsContent value="documents" className="p-5">
+              <div className="mb-4 flex justify-end">
+                <Button size="sm" onClick={() => setUploadOpen(true)}><Upload /> Upload</Button>
+              </div>
+              {documents.length === 0 ? (
+                <EmptyState icon={FileText} title="No documents" description="Upload the petition, vakalatnama and court orders." />
+              ) : (
+                <ul className="divide-y divide-border rounded-xl border border-border">
+                  {documents.map((d) => (
+                    <li key={d.id} className="flex items-center gap-3 px-4 py-3">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted-foreground">
+                        <FileText className="size-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-foreground">{d.filename}</p>
+                        <p className="text-xs text-muted-foreground">{d.doc_category} · {d.size} · {formatDate(d.created_at)}</p>
+                      </div>
+                      {d.file_url ? (
+                        <Button asChild variant="ghost" size="icon-sm" aria-label={`Download ${d.filename}`}>
+                          <a href={d.file_url} download={d.filename}><Download /></a>
+                        </Button>
                       ) : (
-                        <p className="text-sm text-slate-800">{(caseData as any)[f.key] || "—"}</p>
+                        <Button asChild variant="ghost" size="icon-sm" aria-label={`Open ${d.filename} in documents`}>
+                          <Link href={`/documents?doc=${d.id}`}><ExternalLink /></Link>
+                        </Button>
                       )}
-                    </div>
-                  ))}
-                  <div className="col-span-2">
-                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Description</p>
-                    {editMode ? (
-                      <textarea
-                        value={(formData as any).description || ""}
-                        onChange={e => setFormData((d: any) => ({ ...d, description: e.target.value }))}
-                        rows={3}
-                        className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 resize-none"
-                      />
-                    ) : (
-                      <p className="text-sm text-slate-700 leading-relaxed">{caseData.description || "No description"}</p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Hearings Tab */}
-              {activeTab === "Hearings" && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-slate-700">{hearings.length} Hearings</h3>
-                    <button
-                      onClick={() => setShowAddHearing(true)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-700 text-white text-xs font-medium rounded-lg hover:bg-indigo-800 transition-colors"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Add Hearing
-                    </button>
-                  </div>
-
-                  {showAddHearing && (
-                    <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100 space-y-3 animate-scale-in">
-                      <p className="text-xs font-semibold text-indigo-700">New Hearing</p>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium text-slate-600 mb-1">Date</label>
-                          <input type="date" value={hearingForm.date} onChange={e => setHearingForm(f => ({ ...f, date: e.target.value }))}
-                            className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 bg-white" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-600 mb-1">Time</label>
-                          <input type="time" value={hearingForm.time} onChange={e => setHearingForm(f => ({ ...f, time: e.target.value }))}
-                            className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 bg-white" />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-600 mb-1">Court Room</label>
-                        <input value={hearingForm.court_room} onChange={e => setHearingForm(f => ({ ...f, court_room: e.target.value }))}
-                          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 bg-white" />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium text-slate-600 mb-1">Purpose</label>
-                          <select value={hearingForm.purpose} onChange={e => setHearingForm(f => ({ ...f, purpose: e.target.value }))}
-                            className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 bg-white">
-                            {["Mention", "Argument", "Evidence", "Framing of Charges", "Judgment", "Other"].map(p => <option key={p}>{p}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
-                          <input value={hearingForm.outcome_notes} onChange={e => setHearingForm(f => ({ ...f, outcome_notes: e.target.value }))}
-                            className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 bg-white" />
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={handleAddHearing}
-                          className="flex-1 py-2 bg-indigo-700 text-white text-sm font-medium rounded-lg hover:bg-indigo-800 transition-colors">
-                          Add Hearing
-                        </button>
-                        <button onClick={() => setShowAddHearing(false)}
-                          className="px-4 py-2 text-sm text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {hearings.length === 0 ? (
-                    <EmptyState icon="📅" title="No hearings yet" desc="Add the first hearing for this case" />
-                  ) : (
-                    <div className="space-y-3">
-                      {hearings.map(h => {
-                        const isPast = new Date(h.date) < new Date()
-                        const days = getDaysUntil(h.date)
-                        return (
-                          <div key={h.id} className={cn("p-4 rounded-xl border transition-all", isPast ? "border-slate-100 bg-slate-50/50" : "border-indigo-100 bg-indigo-50/40")}>
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className={cn("text-xs font-bold px-2 py-0.5 rounded-full", isPast ? "bg-emerald-100 text-emerald-700" : "bg-indigo-100 text-indigo-700")}>
-                                    {isPast ? "Completed" : "Upcoming"}
-                                  </span>
-                                  <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">{h.purpose}</span>
-                                </div>
-                                <p className="text-sm font-semibold text-slate-900">{formatDate(h.date, "dd MMMM yyyy")} at {h.time}</p>
-                                <p className="text-xs text-slate-500 mt-0.5">{h.court_room}</p>
-                                {h.outcome_notes && <p className="text-xs text-slate-600 mt-2 bg-white rounded-lg p-2 border border-slate-100">{h.outcome_notes}</p>}
-                              </div>
-                              {!isPast && (
-                                <span className={cn("text-[10px] font-semibold px-2 py-1 rounded-full", getCountdownClass(days))}>
-                                  {getCountdownLabel(days)}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Documents Tab */}
-              {activeTab === "Documents" && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-slate-700">{documents.length} Documents</h3>
-                    <button className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-700 text-white text-xs font-medium rounded-lg hover:bg-indigo-800 transition-colors">
-                      <Plus className="w-3.5 h-3.5" /> Upload
-                    </button>
-                  </div>
-
-                  {documents.length === 0 ? (
-                    <EmptyState icon="📄" title="No documents" desc="Upload the first document for this case" />
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {documents.map(d => (
-                        <div key={d.id} className="flex items-start gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100 hover:border-slate-200 hover:bg-white transition-all group">
-                          <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center flex-shrink-0">
-                            <FileText className="w-5 h-5 text-rose-600" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-slate-900 truncate">{d.filename}</p>
-                            <p className="text-[10px] text-slate-500 mt-0.5">{d.doc_category} · {d.size}</p>
-                            <p className="text-[10px] text-slate-400">{formatDate(d.created_at)}</p>
-                          </div>
-                          <button className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-white transition-all text-slate-400 hover:text-indigo-600">
-                            <Download className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Notes Tab */}
-              {activeTab === "Notes" && (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <textarea
-                      value={newNote}
-                      onChange={e => setNewNote(e.target.value)}
-                      placeholder="Add a case note..."
-                      rows={3}
-                      className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl outline-none focus:border-indigo-400 resize-none"
-                    />
-                    <button
-                      onClick={handleAddNote}
-                      disabled={!newNote.trim()}
-                      className="px-4 py-2 bg-indigo-700 text-white text-sm font-medium rounded-xl hover:bg-indigo-800 transition-colors disabled:opacity-50"
-                    >
-                      Add Note
-                    </button>
-                  </div>
-
-                  {notes.length === 0 ? (
-                    <EmptyState icon="📝" title="No notes yet" desc="Add notes about this case" />
-                  ) : (
-                    <div className="space-y-3">
-                      {notes.map(n => (
-                        <div key={n.id} className={cn("p-4 rounded-xl border", n.is_pinned ? "border-amber-200 bg-amber-50/50" : "border-slate-100 bg-white")}>
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1">
-                              {n.is_pinned && <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wider mb-1 flex items-center gap-1"><Pin className="w-3 h-3" /> Pinned</p>}
-                              <p className="text-sm text-slate-800 leading-relaxed">{n.content}</p>
-                              <p className="text-[10px] text-slate-400 mt-2">{n.created_by} · {formatRelativeTime(n.created_at)}</p>
-                            </div>
-                            <div className="flex gap-1">
-                              <button
-                                onClick={() => { updateNote(n.id, { is_pinned: !n.is_pinned }); toast(n.is_pinned ? "Unpinned" : "Pinned", "success") }}
-                                className="p-1.5 rounded-lg hover:bg-amber-100 text-slate-400 hover:text-amber-600 transition-colors"
-                              >
-                                <Pin className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => confirm("Delete Note", "This note will be permanently deleted.", () => { deleteNote(n.id); toast("Note deleted", "success") })}
-                                className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Notices Tab */}
-              {activeTab === "Notices" && (
-                <div className="space-y-3">
-                  {notices.length === 0 ? (
-                    <EmptyState icon="📬" title="No notices" desc="Generate a legal notice for this case" />
-                  ) : notices.map(n => (
-                    <div key={n.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 hover:border-slate-200 hover:bg-white transition-all">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">{n.title}</p>
-                        <p className="text-xs text-slate-500 mt-0.5">{n.notice_type} · {formatDate(n.created_at)}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", n.status === "Sent" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-slate-100 text-slate-600")}>
-                          {n.status}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* AI Summary Tab */}
-              {activeTab === "AI Summary" && (
-                <div className="space-y-4">
-                  {!aiSummary ? (
-                    <div className="text-center py-8">
-                      <div className="w-14 h-14 rounded-2xl bg-indigo-100 flex items-center justify-center mx-auto mb-4">
-                        <Sparkles className="w-7 h-7 text-indigo-700" />
-                      </div>
-                      <h3 className="text-base font-semibold text-slate-900 mb-2">AI Case Summary</h3>
-                      <p className="text-sm text-slate-500 mb-6">Get an instant structured summary of this case including risk flags and suggested next steps.</p>
-                      <button
-                        onClick={handleAISummary}
-                        disabled={aiLoading}
-                        className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-700 text-white font-medium rounded-xl hover:bg-indigo-800 transition-colors disabled:opacity-60"
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Delete ${d.filename}`}
+                        onClick={() => confirm("Delete document?", `${d.filename} will be removed from this case.`, () => { deleteDocument(d.id); toast("Document deleted", "success") })}
                       >
-                        {aiLoading ? (
-                          <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Analyzing...</>
-                        ) : (
-                          <><Sparkles className="w-4 h-4" /> Summarize This Case</>
-                        )}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="w-4 h-4 text-indigo-600" />
-                          <h3 className="text-sm font-semibold text-slate-900">AI Summary</h3>
+                        <Trash2 />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </TabsContent>
+
+            <TabsContent value="notes" className="space-y-4 p-5">
+              <div className="space-y-2">
+                <Textarea
+                  rows={3}
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleAddNote() }}
+                  placeholder="Client instructions, points for arguments, witness details"
+                  aria-label="New note"
+                />
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-subtle-foreground">Ctrl + Enter to save</p>
+                  <Button size="sm" onClick={handleAddNote} disabled={!newNote.trim()}><NotebookPen /> Add note</Button>
+                </div>
+              </div>
+              {notes.length === 0 ? (
+                <EmptyState compact icon={NotebookPen} title="No notes yet" />
+              ) : (
+                <ul className="space-y-2.5">
+                  {notes.map((n) => (
+                    <li key={n.id} className={cn("rounded-xl border p-4", n.is_pinned ? "border-accent/35 bg-accent-soft/60" : "border-border")}>
+                      <div className="flex items-start gap-3">
+                        <p className="flex-1 whitespace-pre-line text-sm leading-relaxed text-foreground">{n.content}</p>
+                        <div className="-mr-1.5 -mt-1 flex">
+                          <Button variant="ghost" size="icon-xs" aria-label={n.is_pinned ? "Unpin note" : "Pin note"} onClick={() => updateNote(n.id, { is_pinned: !n.is_pinned })}>
+                            {n.is_pinned ? <PinOff /> : <Pin />}
+                          </Button>
+                          <Button variant="ghost" size="icon-xs" aria-label="Delete note" onClick={() => confirm("Delete note?", "This note will be permanently deleted.", () => { deleteNote(n.id); toast("Note deleted", "success") })}>
+                            <Trash2 />
+                          </Button>
                         </div>
-                        <button
-                          onClick={() => setAiSummary("")}
-                          className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
-                        >
-                          Regenerate
-                        </button>
                       </div>
-                      <div className="p-5 bg-indigo-50/50 rounded-xl border border-indigo-100">
-                        <div className="prose prose-sm max-w-none text-slate-800">
-                          {aiSummary.split("\n").map((line, i) => (
-                            <p key={i} className={cn("text-sm leading-relaxed", line.startsWith("**") ? "font-semibold text-slate-900" : "text-slate-700")}>
-                              {line.replace(/\*\*/g, "")}
-                            </p>
-                          ))}
+                      <p className="mt-2 text-xs text-subtle-foreground">
+                        {n.is_pinned && <span className="font-medium text-accent-soft-foreground">Pinned · </span>}
+                        {formatRelativeTime(n.created_at)}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </TabsContent>
+
+            <TabsContent value="fees" className="p-5">
+              <CaseFees caseData={caseData} client={client} />
+            </TabsContent>
+
+            <TabsContent value="notices" className="p-5">
+              <div className="mb-4 flex justify-end">
+                <Button asChild size="sm"><Link href={`/notices/new?case=${id}`}><ScrollText /> Draft notice</Link></Button>
+              </div>
+              {notices.length === 0 ? (
+                <EmptyState icon={ScrollText} title="No notices for this case" />
+              ) : (
+                <ul className="divide-y divide-border rounded-xl border border-border">
+                  {notices.map((n) => (
+                    <li key={n.id}>
+                      <Link href={`/notices/${n.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-2/60">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-foreground">{n.title}</p>
+                          <p className="text-xs text-muted-foreground">{n.notice_type} · {formatDate(n.created_at)}</p>
                         </div>
-                      </div>
-                    </div>
-                  )}
+                        <Badge tone={n.status === "Sent" ? "success" : "neutral"}>{n.status}</Badge>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </TabsContent>
+
+            <TabsContent value="ai" className="p-5">
+              {!aiSummary ? (
+                <EmptyState
+                  icon={Sparkles}
+                  title="Brief me on this case"
+                  description="Overview, key dates, current stage, risk flags and next steps from the record above."
+                  action={<Button onClick={handleAISummary} loading={aiLoading}>{!aiLoading && <Sparkles />} {aiLoading ? "Reading the file" : "Generate summary"}</Button>}
+                />
+              ) : (
+                <div className="space-y-4">
+                  <AIText content={aiSummary} />
+                  <div className="flex gap-2 border-t border-border pt-4">
+                    <Button size="sm" variant="outline" onClick={handleAISummary} loading={aiLoading}>Regenerate</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { navigator.clipboard.writeText(aiSummary); toast("Copied", "success") }}><Copy /> Copy</Button>
+                  </div>
+                  <p className="text-xs text-subtle-foreground">AI output is for your review. Verify against the record before relying on it.</p>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
+            </TabsContent>
+          </Tabs>
+        </Card>
 
-        {/* Right Sidebar */}
-        <div className="space-y-4">
-          {/* Client Card */}
-          {client && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Client</h3>
-              <div className="flex items-center gap-3 mb-4">
-                <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center text-white font-bold text-sm", getAvatarColor(client.full_name))}>
-                  {getInitials(client.full_name)}
+        <aside className="space-y-5">
+          <Card className="overflow-hidden">
+            <div className="p-5">
+              <p className="text-xs font-medium text-muted-foreground">Next date</p>
+              {nextHearing ? (
+                <>
+                  <p className="mt-1.5 text-2xl font-semibold tracking-tight text-foreground">{formatDate(nextHearing.date, "dd MMM yyyy")}</p>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    {formatDate(nextHearing.date, "EEEE")} · {formatTime(nextHearing.time)} · {nextHearing.purpose}
+                  </p>
+                  <p className="mt-2 text-[13px] text-muted-foreground">{nextHearing.court_room}{nextHearing.item_no ? ` · Item ${nextHearing.item_no}` : ""}</p>
+                  <CountdownBadge days={getDaysUntil(nextHearing.date)} className="mt-3" />
+                </>
+              ) : (
+                <>
+                  <p className="mt-1.5 text-lg font-semibold text-foreground">Not listed</p>
+                  <p className="mt-0.5 text-[13px] text-muted-foreground">Add the date once the court gives it.</p>
+                  <Button size="sm" variant="outline" className="mt-3" onClick={() => setHearingOpen(true)}><CalendarPlus /> Add hearing</Button>
+                </>
+              )}
+            </div>
+          </Card>
+
+          {client ? (
+            <Card>
+              <CardHeader title="Client" action={<Button asChild variant="ghost" size="xs"><Link href={`/clients/${client.id}`}>Profile</Link></Button>} />
+              <div className="px-5 pb-5 pt-2">
+                <div className="flex items-center gap-3">
+                  <Avatar name={client.full_name} size="md" />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-foreground">{client.full_name}</p>
+                    <p className="text-[13px] text-muted-foreground">{client.phone}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">{client.full_name}</p>
-                  <p className="text-xs text-slate-500">{client.phone}</p>
+                {client.notes && <p className="mt-3 rounded-lg bg-surface-2 px-3 py-2 text-[13px] text-muted-foreground">{client.notes}</p>}
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <Button asChild variant="outline" size="sm"><a href={`tel:${client.phone.replace(/\s/g, "")}`}><Phone /> Call</a></Button>
+                  {nextHearing ? (
+                    <WhatsAppMenu size="sm" label="Remind" phone={client.phone} preferred={client.preferred_language} message={reminder(nextHearing)} />
+                  ) : (
+                    <WhatsAppMenu size="sm" label="WhatsApp" phone={client.phone} preferred={client.preferred_language} message={(lang) => (lang === "Hindi" ? `नमस्ते ${client.full_name} जी,\n\n` : `Dear ${client.full_name},\n\n`)} />
+                  )}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <a
-                  href={`tel:${client.phone}`}
-                  className="flex items-center justify-center gap-2 py-2 rounded-xl bg-slate-50 text-slate-700 text-xs font-medium hover:bg-slate-100 transition-colors border border-slate-100"
-                >
-                  <Phone className="w-3.5 h-3.5" /> Call
-                </a>
-                <a
-                  href={`https://wa.me/${client.phone.replace(/\D/g, "")}`}
-                  target="_blank"
-                  className="flex items-center justify-center gap-2 py-2 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-medium hover:bg-emerald-100 transition-colors border border-emerald-100"
-                >
-                  <MessageSquare className="w-3.5 h-3.5" /> WhatsApp
-                </a>
-              </div>
-              <Link href={`/clients/${client.id}`} className="mt-3 flex items-center justify-center gap-1 py-2 text-xs text-indigo-600 hover:text-indigo-700 font-medium">
-                View Full Profile <ChevronRight className="w-3 h-3" />
-              </Link>
-            </div>
+            </Card>
+          ) : (
+            <Card className="p-5">
+              <p className="text-sm font-medium text-foreground">No client linked</p>
+              <p className="mt-0.5 text-[13px] text-muted-foreground">Link a client to send reminders and track fees.</p>
+            </Card>
           )}
 
-          {/* Next Hearing */}
-          {nextHearing && (
-            <div className="bg-gradient-to-br from-indigo-700 to-indigo-800 rounded-2xl p-5 text-white">
-              <h3 className="text-xs font-semibold text-indigo-200 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5" /> Next Hearing
-              </h3>
-              <p className="text-2xl font-bold mb-1">{daysToNextHearing === 0 ? "Today" : daysToNextHearing === 1 ? "Tomorrow" : `${daysToNextHearing} days`}</p>
-              <p className="text-indigo-200 text-sm">{formatDate(nextHearing.date, "EEEE, dd MMM yyyy")}</p>
-              <p className="text-indigo-200 text-sm">{nextHearing.time} · {nextHearing.purpose}</p>
-              <p className="text-indigo-300 text-xs mt-2">{nextHearing.court_room}</p>
-            </div>
-          )}
-
-          {/* Quick Stats */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Case Stats</h3>
-            <div className="space-y-3">
-              {[
-                { label: "Hearings", value: hearings.length, icon: <Calendar className="w-4 h-4 text-indigo-600" /> },
-                { label: "Documents", value: documents.length, icon: <FileText className="w-4 h-4 text-amber-600" /> },
-                { label: "Notes", value: notes.length, icon: <Paperclip className="w-4 h-4 text-blue-600" /> },
-                { label: "Notices", value: notices.length, icon: <MessageSquare className="w-4 h-4 text-emerald-600" /> },
-              ].map(s => (
-                <div key={s.label} className="flex items-center gap-3">
-                  {s.icon}
-                  <span className="text-sm text-slate-600 flex-1">{s.label}</span>
-                  <span className="text-sm font-bold text-slate-900">{s.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+          <Card>
+            <CardHeader title="Fees" action={<Button variant="ghost" size="xs" onClick={() => setTab("fees")}>Ledger</Button>} />
+            <dl className="px-5 pb-4">
+              <DetailRow label="Agreed">{formatINR(fees.agreed)}</DetailRow>
+              <DetailRow label="Received">{formatINR(fees.received)}</DetailRow>
+              <DetailRow label="Balance">
+                <span className={fees.balance > 0 ? "text-warning-soft-foreground" : "text-success-soft-foreground"}>{formatINR(fees.balance)}</span>
+              </DetailRow>
+            </dl>
+          </Card>
+        </aside>
       </div>
-    </div>
-  )
-}
 
-function EmptyState({ icon, title, desc }: { icon: string; title: string; desc: string }) {
-  return (
-    <div className="flex flex-col items-center py-10 text-center">
-      <span className="text-3xl mb-3 opacity-60">{icon}</span>
-      <p className="text-sm font-medium text-slate-600">{title}</p>
-      <p className="text-xs text-slate-400 mt-1">{desc}</p>
+      <CaseEditSheet caseData={caseData} open={editOpen} onOpenChange={setEditOpen} />
+      <RecordOutcomeSheet hearing={outcomeFor} onOpenChange={(o) => !o && setOutcomeFor(null)} />
+      <AddHearingDialog open={hearingOpen} onOpenChange={setHearingOpen} caseId={id} />
+      <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} caseId={id} />
     </div>
   )
 }

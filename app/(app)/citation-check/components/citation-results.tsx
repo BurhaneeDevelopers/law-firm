@@ -1,134 +1,121 @@
 "use client"
 import { useState } from "react"
-import { ChevronDown, ChevronRight, Check, AlertTriangle, XCircle, HelpCircle, ExternalLink, Trash2, Search } from "lucide-react"
+import { Check, ChevronDown, CircleHelp, CircleX, Search, Trash2, TriangleAlert } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import type { Tone } from "@/lib/constants"
 import type { CitationResult } from "@/lib/citation-store"
 
-const statusConfig = {
-  VERIFIED: { label: "Verified", color: "bg-emerald-100 text-emerald-700 border-emerald-200", barColor: "bg-emerald-500", icon: <Check className="w-3.5 h-3.5" /> },
-  SUSPICIOUS: { label: "Suspicious", color: "bg-amber-100 text-amber-700 border-amber-200", barColor: "bg-amber-500", icon: <AlertTriangle className="w-3.5 h-3.5" /> },
-  HALLUCINATED: { label: "Hallucinated", color: "bg-rose-100 text-rose-700 border-rose-200", barColor: "bg-rose-500", icon: <XCircle className="w-3.5 h-3.5" /> },
-  NOT_FOUND: { label: "Not Found", color: "bg-slate-100 text-slate-600 border-slate-200", barColor: "bg-slate-400", icon: <HelpCircle className="w-3.5 h-3.5" /> },
+const statusConfig: Record<CitationResult["status"], { label: string; tone: Tone; icon: React.ReactNode }> = {
+  VERIFIED: { label: "Verified", tone: "success", icon: <Check /> },
+  SUSPICIOUS: { label: "Suspicious", tone: "warning", icon: <TriangleAlert /> },
+  HALLUCINATED: { label: "Not found in any court", tone: "danger", icon: <CircleX /> },
+  NOT_FOUND: { label: "Could not verify", tone: "neutral", icon: <CircleHelp /> },
 }
 
 interface Props {
   results: CitationResult[]
-  onAccept?: (index: number) => void
-  onRemove?: (index: number) => void
 }
 
-export function CitationResults({ results, onAccept, onRemove }: Props) {
-  const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
-  const verified = results.filter(r => r.status === "VERIFIED").length
-  const flagged = results.filter(r => r.status === "SUSPICIOUS").length
-  const hallucinated = results.filter(r => r.status === "HALLUCINATED").length
+export function CitationResults({ results }: Props) {
+  const [expanded, setExpanded] = useState<number | null>(() => {
+    const firstProblem = results.findIndex((r) => r.status === "HALLUCINATED" || r.status === "SUSPICIOUS")
+    return firstProblem >= 0 ? firstProblem : null
+  })
+  const [decisions, setDecisions] = useState<Record<number, "accepted" | "removed">>({})
+
+  const counts = {
+    total: results.length,
+    verified: results.filter((r) => r.status === "VERIFIED").length,
+    suspicious: results.filter((r) => r.status === "SUSPICIOUS").length,
+    hallucinated: results.filter((r) => r.status === "HALLUCINATED").length,
+  }
 
   return (
-    <div className="space-y-4 animate-fade-in">
-      {/* Summary strip */}
-      <div className="grid grid-cols-4 gap-2">
-        <div className="bg-slate-50 rounded-lg p-3 text-center">
-          <p className="text-lg font-bold text-slate-900">{results.length}</p>
-          <p className="text-[10px] text-slate-500">Total Found</p>
-        </div>
-        <div className="bg-emerald-50 rounded-lg p-3 text-center">
-          <p className="text-lg font-bold text-emerald-700">{verified}</p>
-          <p className="text-[10px] text-emerald-600">Verified ✓</p>
-        </div>
-        <div className="bg-amber-50 rounded-lg p-3 text-center">
-          <p className="text-lg font-bold text-amber-700">{flagged}</p>
-          <p className="text-[10px] text-amber-600">Flagged ⚠</p>
-        </div>
-        <div className="bg-rose-50 rounded-lg p-3 text-center">
-          <p className="text-lg font-bold text-rose-700">{hallucinated}</p>
-          <p className="text-[10px] text-rose-600">Hallucinated ✗</p>
-        </div>
-      </div>
+    <div className="space-y-4">
+      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          { label: "Citations found", value: counts.total, cls: "bg-surface-2 text-foreground" },
+          { label: "Verified", value: counts.verified, cls: "bg-success-soft text-success-soft-foreground" },
+          { label: "Suspicious", value: counts.suspicious, cls: "bg-warning-soft text-warning-soft-foreground" },
+          { label: "Fabricated", value: counts.hallucinated, cls: "bg-danger-soft text-danger-soft-foreground" },
+        ].map((s) => (
+          <div key={s.label} className={cn("rounded-xl px-3 py-2.5", s.cls)}>
+            <dd className="tabular text-xl font-semibold">{s.value}</dd>
+            <dt className="text-xs opacity-85">{s.label}</dt>
+          </div>
+        ))}
+      </dl>
 
-      <div className="h-px bg-slate-100" />
-
-      {/* Citation cards */}
-      <div className="space-y-3">
+      <ul className="space-y-2">
         {results.map((r, i) => {
-          const cfg = statusConfig[r.status]
-          const expanded = expandedIdx === i
+          const cfg = statusConfig[r.status] ?? statusConfig.NOT_FOUND
+          const open = expanded === i
+          const decision = decisions[i]
           return (
-            <div key={i} className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
-              <div className="p-4 cursor-pointer hover:bg-slate-50/50 transition-colors" onClick={() => setExpandedIdx(expanded ? null : i)}>
-                <div className="flex items-start gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-900">{r.raw_text}</p>
-                    <p className="text-xs text-slate-500 mt-1 line-clamp-1">{r.context}</p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className={cn("inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border", cfg.color)}>
-                      {cfg.icon} {cfg.label}
-                    </span>
-                    {expanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-                  </div>
+            <li key={i} className={cn("overflow-hidden rounded-xl border border-border", decision === "removed" && "opacity-60")}>
+              <button
+                type="button"
+                onClick={() => setExpanded(open ? null : i)}
+                aria-expanded={open}
+                className="flex w-full items-start gap-3 p-4 text-left transition-colors hover:bg-surface-2/60"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className={cn("text-sm font-medium text-foreground", decision === "removed" && "line-through")}>{r.raw_text}</p>
+                  {r.context && <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{r.context}</p>}
                 </div>
-                {/* Confidence bar */}
-                <div className="mt-2.5 flex items-center gap-2">
-                  <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div className={cn("h-full rounded-full transition-all duration-700", cfg.barColor)} style={{ width: `${r.confidence}%` }} />
-                  </div>
-                  <span className="text-[10px] text-slate-500 font-medium">{r.confidence}%</span>
+                <div className="flex shrink-0 items-center gap-2">
+                  {decision && <Badge tone={decision === "accepted" ? "success" : "neutral"}>{decision === "accepted" ? "Accepted" : "Removed"}</Badge>}
+                  <Badge tone={cfg.tone}>{cfg.icon} {cfg.label}</Badge>
+                  <span className="tabular hidden text-xs text-subtle-foreground sm:inline">{r.confidence}%</span>
+                  <ChevronDown className={cn("size-4 text-subtle-foreground transition-transform", open && "rotate-180")} />
                 </div>
-              </div>
+              </button>
 
-              {/* Expanded detail */}
-              {expanded && (
-                <div className="border-t border-slate-100 p-4 animate-fade-in">
+              {open && (
+                <div className="space-y-3 border-t border-border px-4 py-3.5 animate-fade-in">
                   {r.status === "VERIFIED" && (
-                    <div className="space-y-2 text-xs text-slate-700">
-                      {r.actual_case_name && <p><span className="font-semibold">Case:</span> {r.actual_case_name}</p>}
-                      {r.court && <p><span className="font-semibold">Court:</span> {r.court}</p>}
-                      {r.date && <p><span className="font-semibold">Date:</span> {r.date}</p>}
-                      {r.brief_summary && <p className="bg-emerald-50 rounded-lg p-3 text-emerald-800 leading-relaxed">{r.brief_summary}</p>}
-                    </div>
+                    <dl className="space-y-1 text-[13px]">
+                      {r.actual_case_name && <div><dt className="inline text-muted-foreground">Case: </dt><dd className="inline text-foreground">{r.actual_case_name}</dd></div>}
+                      {r.actual_citation && <div><dt className="inline text-muted-foreground">Citation: </dt><dd className="inline font-mono text-foreground">{r.actual_citation}</dd></div>}
+                      {r.court && <div><dt className="inline text-muted-foreground">Court: </dt><dd className="inline text-foreground">{r.court}</dd></div>}
+                      {r.brief_summary && <p className="mt-2 rounded-lg bg-success-soft px-3 py-2 text-success-soft-foreground">{r.brief_summary}</p>}
+                    </dl>
                   )}
                   {r.status === "SUSPICIOUS" && (
-                    <div className="space-y-2">
-                      <div className="bg-amber-50 rounded-lg p-3">
-                        <p className="text-xs text-amber-800">{r.issue || "This citation exists but the case name/year may be incorrect."}</p>
-                        {r.actual_citation && (
-                          <p className="text-xs mt-2"><span className="font-semibold text-amber-900">Suggested match:</span> <span className="bg-amber-100 px-1.5 py-0.5 rounded font-mono">{r.actual_citation}</span></p>
-                        )}
-                      </div>
-                      {r.suggestion && <p className="text-xs text-slate-600 italic">{r.suggestion}</p>}
+                    <div className="rounded-lg bg-warning-soft px-3 py-2.5 text-[13px] text-warning-soft-foreground">
+                      <p>{r.issue || "The case exists but the name, year or citation may be wrong."}</p>
+                      {r.actual_citation && <p className="mt-1.5">Likely correct citation: <span className="font-mono font-semibold">{r.actual_citation}</span></p>}
                     </div>
                   )}
                   {r.status === "HALLUCINATED" && (
-                    <div className="bg-rose-50 rounded-lg p-3 border border-rose-100">
-                      <p className="text-xs text-rose-800 font-semibold">⚠ This case does not exist in any Indian court database. Do not use in filing.</p>
-                      {r.issue && <p className="text-xs text-rose-700 mt-1.5">{r.issue}</p>}
-                      {r.suggestion && <p className="text-xs text-rose-600 mt-2 italic">{r.suggestion}</p>}
+                    <div className="rounded-lg bg-danger-soft px-3 py-2.5 text-[13px] text-danger-soft-foreground">
+                      <p className="font-semibold">No matching judgment found in any Indian court database. Do not file with this citation.</p>
+                      {r.issue && <p className="mt-1.5">{r.issue}</p>}
                     </div>
                   )}
                   {r.status === "NOT_FOUND" && (
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                      <p className="text-xs text-slate-700">Could not verify. May be unreported or regional court judgment. Manual verification recommended.</p>
-                    </div>
+                    <p className="rounded-lg bg-surface-2 px-3 py-2.5 text-[13px] text-muted-foreground">
+                      May be unreported or a regional judgment. Check the certified copy or SCC Online before relying on it.
+                    </p>
                   )}
-
-                  {/* Action buttons */}
-                  <div className="flex items-center gap-2 mt-3">
-                    <button onClick={() => onAccept?.(i)} className="inline-flex items-center gap-1 text-[11px] font-medium px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors">
-                      <Check className="w-3 h-3" /> Accept
-                    </button>
-                    <button onClick={() => onRemove?.(i)} className="inline-flex items-center gap-1 text-[11px] font-medium px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors">
-                      <Trash2 className="w-3 h-3" /> Remove from Draft
-                    </button>
-                    <button className="inline-flex items-center gap-1 text-[11px] font-medium px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-colors">
-                      <Search className="w-3 h-3" /> Find Alternative
-                    </button>
+                  {r.suggestion && <p className="text-[13px] text-muted-foreground">{r.suggestion}</p>}
+                  <div className="flex flex-wrap gap-1.5">
+                    <Button size="xs" variant="outline" onClick={() => setDecisions((d) => ({ ...d, [i]: "accepted" }))}><Check /> Accept</Button>
+                    <Button size="xs" variant="outline" onClick={() => setDecisions((d) => ({ ...d, [i]: "removed" }))}><Trash2 /> Remove from draft</Button>
+                    <Button asChild size="xs" variant="ghost">
+                      <a href={`https://indiankanoon.org/search/?formInput=${encodeURIComponent(r.case_name || r.raw_text)}`} target="_blank" rel="noreferrer">
+                        <Search /> Search Indian Kanoon
+                      </a>
+                    </Button>
                   </div>
                 </div>
               )}
-            </div>
+            </li>
           )
         })}
-      </div>
+      </ul>
     </div>
   )
 }

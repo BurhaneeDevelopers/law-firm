@@ -1,224 +1,253 @@
 "use client"
-import { useState } from "react"
-import { Search, FileText, Download, Eye, Sparkles, X, Copy, Check } from "lucide-react"
-import { cn, formatDate } from "@/lib/utils"
-import { getDocuments, getCases } from "@/lib/store"
-import { callGemini } from "@/lib/gemini"
+import { useMemo, useState } from "react"
+import Link from "next/link"
+import {
+  CalendarClock, Copy, Download, ExternalLink, FileImage, FileText, FileType2, FolderOpen, LayoutGrid, List,
+  ListChecks, ShieldAlert, Sparkles, Trash2, Upload,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Card, DetailRow } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { SearchInput, Select } from "@/components/ui/field"
+import { Chip, EmptyState, PageHeader, Segmented } from "@/components/ui/misc"
+import { Dialog, SheetContent } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/toast"
+import { useConfirmDialog } from "@/components/ui/confirm-dialog"
+import { UploadDialog } from "@/components/practice/upload-dialog"
+import { AIText } from "@/components/practice/ai-text"
+import { DOC_CATEGORIES } from "@/lib/constants"
+import { cn, formatDate } from "@/lib/utils"
+import { deleteDocument, useDB, type Document } from "@/lib/store"
+import { callGemini } from "@/lib/gemini"
 
-const DOC_CATEGORIES = ["All", "Petition", "Affidavit", "Evidence", "Notice", "Order", "Other"]
-const FILE_ICONS: Record<string, string> = {
-  PDF: "📄", Word: "📝", Image: "🖼️", Other: "📁"
+const fileIcon: Record<string, React.ComponentType<{ className?: string }>> = {
+  PDF: FileText,
+  Word: FileType2,
+  Image: FileImage,
 }
 
+const AI_ACTIONS = [
+  { id: "summarize", label: "Summarise", icon: ListChecks },
+  { id: "dates", label: "Key dates", icon: CalendarClock },
+  { id: "risks", label: "Risk points", icon: ShieldAlert },
+] as const
+
 export default function DocumentsPage() {
-  const [search, setSearch] = useState("")
-  const [filterCategory, setFilterCategory] = useState("All")
-  const [selectedDoc, setSelectedDoc] = useState<string | null>(null)
-  const [aiAction, setAiAction] = useState<string | null>(null)
-  const [aiResult, setAiResult] = useState("")
-  const [aiLoading, setAiLoading] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const db = useDB()
   const { toast } = useToast()
+  const { confirm, dialogElement } = useConfirmDialog()
+  const [search, setSearch] = useState("")
+  const [category, setCategory] = useState("All")
+  const [caseFilter, setCaseFilter] = useState("All")
+  const [view, setView] = useState<"grid" | "list">("list")
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [openId, setOpenId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("doc"))
+  const [ai, setAi] = useState<{ action: string; result: string; loading: boolean } | null>(null)
 
-  const documents = getDocuments()
-  const cases = getCases()
+  const caseById = useMemo(() => new Map(db.cases.map((c) => [c.id, c])), [db.cases])
 
-  const filtered = documents.filter(d => {
-    const q = search.toLowerCase()
-    const matchSearch = !q || d.filename.toLowerCase().includes(q) ||
-      cases.find(c => c.id === d.case_id)?.case_number.toLowerCase().includes(q)
-    const matchCat = filterCategory === "All" || d.doc_category === filterCategory
-    return matchSearch && matchCat
-  })
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return db.documents
+      .filter((d) => {
+        const c = caseById.get(d.case_id)
+        const matchQ = !q || d.filename.toLowerCase().includes(q) || c?.case_number.toLowerCase().includes(q) || c?.title.toLowerCase().includes(q)
+        return matchQ && (category === "All" || d.doc_category === category) && (caseFilter === "All" || d.case_id === caseFilter)
+      })
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+  }, [db.documents, search, category, caseFilter, caseById])
 
-  const selectedDocData = selectedDoc ? documents.find(d => d.id === selectedDoc) : null
-  const selectedCase = selectedDocData ? cases.find(c => c.id === selectedDocData.case_id) : null
+  const openDoc = openId ? db.documents.find((d) => d.id === openId) : undefined
+  const openCase = openDoc ? caseById.get(openDoc.case_id) : undefined
 
-  const handleAI = async (action: string) => {
-    if (!selectedDocData) return
-    setAiAction(action)
-    setAiLoading(true)
-    setAiResult("")
-
+  const runAI = async (doc: Document, action: string) => {
+    setAi({ action, result: "", loading: true })
+    const c = caseById.get(doc.case_id)
     const prompts: Record<string, string> = {
-      summarize: `Summarize this legal document in plain English:\nFilename: ${selectedDocData.filename}\nType: ${selectedDocData.doc_category}\nCase: ${selectedCase?.title}\n\nProvide a brief plain-language summary suitable for a lawyer's review.`,
-      dates: `Extract all key dates from this legal document:\nFilename: ${selectedDocData.filename}\nType: ${selectedDocData.doc_category}\nCase: ${selectedCase?.title}\n\nList all dates mentioned and what they refer to.`,
-      risks: `Flag any legal risk points in this document:\nFilename: ${selectedDocData.filename}\nType: ${selectedDocData.doc_category}\nCase: ${selectedCase?.title}\n\nHighlight any clauses, statements, or facts that may pose legal risks.`,
+      summarize: `Summarise this legal document in plain English for the advocate's review.\nFile: ${doc.filename}\nType: ${doc.doc_category}\nCase: ${c?.title} (${c?.case_number})`,
+      dates: `List the key dates likely in this document and what each refers to (filing, orders, limitation).\nFile: ${doc.filename}\nType: ${doc.doc_category}\nCase: ${c?.title}`,
+      risks: `Flag legal risk points to check in this document (admissions, gaps, limitation, jurisdiction).\nFile: ${doc.filename}\nType: ${doc.doc_category}\nCase: ${c?.title}`,
     }
-
-    const result = await callGemini(prompts[action] || "")
-    setAiResult(result)
-    setAiLoading(false)
+    const result = await callGemini(prompts[action])
+    setAi({ action, result, loading: false })
   }
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(aiResult)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-    toast("Copied to clipboard", "success")
+  const categoryCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    db.documents.forEach((d) => m.set(d.doc_category, (m.get(d.doc_category) ?? 0) + 1))
+    return m
+  }, [db.documents])
+
+  const docIcon = (d: Document, size = "size-4") => {
+    const Icon = fileIcon[d.file_type] ?? FileText
+    return <Icon className={size} />
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">Documents</h1>
-          <p className="text-sm text-slate-500">{filtered.length} files</p>
-        </div>
-        <button className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-700 text-white text-sm font-medium rounded-xl hover:bg-indigo-800 transition-colors">
-          + Upload
-        </button>
-      </div>
+    <div className="space-y-5">
+      {dialogElement}
+      <PageHeader
+        title="Documents"
+        description={`${db.documents.length} files across ${new Set(db.documents.map((d) => d.case_id)).size} cases`}
+        actions={<Button onClick={() => setUploadOpen(true)}><Upload /> Upload</Button>}
+      />
 
-      <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-wrap gap-3 items-center">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search files..."
-            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400" />
-        </div>
-        <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)}
-          className="px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 bg-white text-slate-700">
-          {DOC_CATEGORIES.map(c => <option key={c}>{c}</option>)}
-        </select>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Document Grid */}
-        <div className={cn("space-y-1", selectedDoc ? "lg:col-span-2" : "lg:col-span-3")}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {filtered.map(d => {
-              const docCase = cases.find(c => c.id === d.case_id)
-              return (
-                <div
-                  key={d.id}
-                  onClick={() => setSelectedDoc(d.id === selectedDoc ? null : d.id)}
-                  className={cn(
-                    "bg-white rounded-xl border p-4 cursor-pointer card-hover transition-all",
-                    selectedDoc === d.id ? "border-indigo-400 bg-indigo-50/40 shadow-md" : "border-slate-100 hover:border-slate-200"
-                  )}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <span className="text-2xl">{FILE_ICONS[d.file_type] || FILE_ICONS.Other}</span>
-                    <span className="text-[10px] font-medium bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{d.doc_category}</span>
-                  </div>
-                  <p className="text-xs font-semibold text-slate-900 truncate mb-1">{d.filename}</p>
-                  <p className="text-[10px] text-slate-500 truncate">{docCase?.case_number || "No case"}</p>
-                  <p className="text-[10px] text-slate-400 mt-1">{formatDate(d.created_at)}</p>
-                  {d.size && <p className="text-[10px] text-slate-400">{d.size}</p>}
-                  <div className="flex gap-2 mt-3 opacity-0 group-hover:opacity-100">
-                    <button onClick={(e) => { e.stopPropagation() }}
-                      className="flex-1 py-1.5 bg-slate-100 text-slate-600 text-[10px] font-medium rounded-lg hover:bg-slate-200 transition-colors flex items-center justify-center gap-1">
-                      <Download className="w-3 h-3" /> Download
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-
-            {filtered.length === 0 && (
-              <div className="col-span-3 flex flex-col items-center py-16 text-slate-400">
-                <FileText className="w-10 h-10 mb-3 opacity-40" />
-                <p className="text-sm">No documents found</p>
-              </div>
-            )}
+      <div className="space-y-3">
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
+          <SearchInput className="sm:max-w-sm sm:flex-1" value={search} onChange={setSearch} placeholder="Search file name or case" />
+          <div className="flex items-center gap-2 sm:ml-auto">
+            <Select aria-label="Filter by case" value={caseFilter} onChange={(e) => setCaseFilter(e.target.value)} className="h-9 w-auto min-w-44 max-w-64">
+              <option value="All">All cases</option>
+              {db.cases.map((c) => <option key={c.id} value={c.id}>{c.case_number}</option>)}
+            </Select>
+            <Segmented
+              ariaLabel="View"
+              value={view}
+              onChange={setView}
+              options={[
+                { value: "list", label: <span className="sr-only">List</span>, icon: <List />, title: "List" },
+                { value: "grid", label: <span className="sr-only">Grid</span>, icon: <LayoutGrid />, title: "Grid" },
+              ]}
+            />
           </div>
         </div>
+        <div className="scrollbar-hide -mx-4 flex gap-2 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0">
+          <Chip active={category === "All"} onClick={() => setCategory("All")}>All</Chip>
+          {DOC_CATEGORIES.filter((c) => categoryCounts.get(c)).map((c) => (
+            <Chip key={c} active={category === c} count={categoryCounts.get(c)} onClick={() => setCategory(category === c ? "All" : c)}>{c}</Chip>
+          ))}
+        </div>
+      </div>
 
-        {/* Document Preview / AI Panel */}
-        {selectedDoc && selectedDocData && (
-          <div className="space-y-4 animate-slide-up">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-                <h3 className="text-sm font-semibold text-slate-900">Document Details</h3>
-                <button onClick={() => setSelectedDoc(null)} className="p-1 rounded-lg hover:bg-slate-100 text-slate-400">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="p-4">
-                <div className="flex items-center gap-3 mb-4">
-                  <span className="text-3xl">{FILE_ICONS[selectedDocData.file_type] || FILE_ICONS.Other}</span>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{selectedDocData.filename}</p>
-                    <p className="text-xs text-slate-500">{selectedDocData.doc_category}</p>
-                  </div>
-                </div>
-                <div className="space-y-2 text-xs">
-                  {[
-                    { label: "Case", value: selectedCase?.case_number },
-                    { label: "Type", value: selectedDocData.doc_category },
-                    { label: "Uploaded By", value: selectedDocData.uploaded_by },
-                    { label: "Date", value: formatDate(selectedDocData.created_at) },
-                    { label: "Size", value: selectedDocData.size },
-                  ].map(item => (
-                    <div key={item.label} className="flex justify-between">
-                      <span className="text-slate-500">{item.label}</span>
-                      <span className="font-medium text-slate-800 text-right max-w-[140px] truncate">{item.value || "—"}</span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* PDF Preview */}
-                <div className="mt-4 h-32 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-center">
-                  <div className="text-center text-slate-400">
-                    <Eye className="w-6 h-6 mx-auto mb-1 opacity-40" />
-                    <p className="text-[10px]">PDF Preview</p>
-                    <p className="text-[9px]">(File on server)</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* AI Actions */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100">
-                <Sparkles className="w-4 h-4 text-indigo-600" />
-                <h3 className="text-sm font-semibold text-slate-900">AI Analysis</h3>
-              </div>
-              <div className="p-4 space-y-2">
-                {[
-                  { action: "summarize", label: "Summarize Document", icon: "📋" },
-                  { action: "dates", label: "Extract Key Dates", icon: "📅" },
-                  { action: "risks", label: "Flag Risk Points", icon: "⚠️" },
-                ].map(item => (
+      {filtered.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={FolderOpen}
+            title={db.documents.length ? "No documents match" : "No documents yet"}
+            description={db.documents.length ? "Change the search or filters." : "Upload petitions, orders and evidence to keep each case file complete."}
+            action={<Button size="sm" onClick={() => setUploadOpen(true)}><Upload /> Upload</Button>}
+          />
+        </Card>
+      ) : view === "list" ? (
+        <Card className="overflow-hidden">
+          <ul className="divide-y divide-border">
+            {filtered.map((d) => {
+              const c = caseById.get(d.case_id)
+              return (
+                <li key={d.id}>
                   <button
-                    key={item.action}
-                    onClick={() => handleAI(item.action)}
-                    disabled={aiLoading && aiAction === item.action}
-                    className={cn(
-                      "w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-medium transition-all text-left",
-                      aiAction === item.action && aiResult ? "bg-indigo-50 border border-indigo-200 text-indigo-700" : "bg-slate-50 hover:bg-slate-100 text-slate-700 border border-transparent"
-                    )}
+                    type="button"
+                    onClick={() => { setOpenId(d.id); setAi(null) }}
+                    className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-surface-2/60"
                   >
-                    <span>{item.icon}</span>
-                    {item.label}
-                    {aiLoading && aiAction === item.action && (
-                      <span className="ml-auto w-3.5 h-3.5 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
-                    )}
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted-foreground">{docIcon(d)}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-foreground">{d.filename}</span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        <span className="font-mono">{c?.case_number ?? "No case"}</span> · {d.size} · {formatDate(d.created_at)}
+                      </span>
+                    </span>
+                    <Badge className="hidden sm:inline-flex">{d.doc_category}</Badge>
                   </button>
-                ))}
+                </li>
+              )
+            })}
+          </ul>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+          {filtered.map((d) => {
+            const c = caseById.get(d.case_id)
+            return (
+              <button
+                key={d.id}
+                type="button"
+                onClick={() => { setOpenId(d.id); setAi(null) }}
+                className="flex flex-col rounded-2xl border border-border bg-surface p-4 text-left shadow-xs transition-[border-color,box-shadow] hover:border-border-strong hover:shadow-md"
+              >
+                <span className="flex items-center justify-between">
+                  <span className="flex size-9 items-center justify-center rounded-lg bg-surface-2 text-muted-foreground">{docIcon(d)}</span>
+                  <Badge>{d.doc_category}</Badge>
+                </span>
+                <span className="mt-3 line-clamp-2 break-all text-[13px] font-medium text-foreground">{d.filename}</span>
+                <span className="mt-auto pt-2 font-mono text-[11px] text-subtle-foreground">{c?.case_number}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
-                {aiResult && !aiLoading && (
-                  <div className="mt-3 p-3 bg-indigo-50/50 rounded-xl border border-indigo-100 animate-fade-in">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-[10px] font-semibold text-indigo-600 uppercase">Result</p>
-                      <button onClick={handleCopy} className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-700">
-                        {copied ? <><Check className="w-3 h-3 text-emerald-500" /> Copied</> : <><Copy className="w-3 h-3" /> Copy</>}
-                      </button>
-                    </div>
-                    <div className="text-xs text-slate-700 leading-relaxed max-h-48 overflow-y-auto">
-                      {aiResult.split("\n").map((line, i) => (
-                        <p key={i} className="mb-1">{line.replace(/\*\*/g, "")}</p>
-                      ))}
-                    </div>
+      <Dialog open={!!openDoc} onOpenChange={(o) => { if (!o) { setOpenId(null); setAi(null) } }}>
+        {openDoc && (
+          <SheetContent title={openDoc.filename} description={`${openDoc.doc_category} · ${openDoc.size}`} className="max-w-lg">
+            <div className="space-y-5">
+              <div className="overflow-hidden rounded-xl border border-border bg-surface-2">
+                {openDoc.file_url && openDoc.file_type === "PDF" ? (
+                  <iframe src={openDoc.file_url} title={openDoc.filename} className="h-80 w-full bg-white" />
+                ) : openDoc.file_url && openDoc.file_type === "Image" ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={openDoc.file_url} alt={openDoc.filename} className="max-h-80 w-full object-contain" />
+                ) : (
+                  <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
+                    <span className="text-muted-foreground">{docIcon(openDoc, "size-7")}</span>
+                    <p className="max-w-[32ch] text-xs text-subtle-foreground">Preview appears for files uploaded in this session. Stored files open once cloud storage is connected.</p>
                   </div>
                 )}
               </div>
+
+              <div className="flex flex-wrap gap-2">
+                {openDoc.file_url && (
+                  <Button asChild size="sm"><a href={openDoc.file_url} download={openDoc.filename}><Download /> Download</a></Button>
+                )}
+                {openCase && (
+                  <Button asChild size="sm" variant="outline"><Link href={`/cases/${openCase.id}`}><ExternalLink /> Open case</Link></Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="danger-ghost"
+                  onClick={() => confirm("Delete document?", `${openDoc.filename} will be removed.`, () => { deleteDocument(openDoc.id); setOpenId(null); toast("Document deleted", "success") })}
+                >
+                  <Trash2 /> Delete
+                </Button>
+              </div>
+
+              <dl className="divide-y divide-border rounded-xl border border-border px-4">
+                <DetailRow label="Case">{openCase ? <span className="font-mono">{openCase.case_number}</span> : "Not linked"}</DetailRow>
+                <DetailRow label="Uploaded by">{openDoc.uploaded_by}</DetailRow>
+                <DetailRow label="Date">{formatDate(openDoc.created_at, "dd MMM yyyy, h:mm a")}</DetailRow>
+              </dl>
+
+              <section>
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground"><Sparkles className="size-4 text-primary" /> AI analysis</h3>
+                <div className="mt-2.5 grid grid-cols-3 gap-2">
+                  {AI_ACTIONS.map((a) => (
+                    <Button
+                      key={a.id}
+                      size="sm"
+                      variant={ai?.action === a.id ? "soft" : "outline"}
+                      loading={ai?.loading && ai.action === a.id}
+                      disabled={ai?.loading}
+                      onClick={() => runAI(openDoc, a.id)}
+                    >
+                      {!(ai?.loading && ai.action === a.id) && <a.icon />} {a.label}
+                    </Button>
+                  ))}
+                </div>
+                {ai && !ai.loading && ai.result && (
+                  <div className={cn("mt-3 rounded-xl border border-border p-4 animate-rise")}>
+                    <AIText content={ai.result} className="text-[13px]" />
+                    <Button size="xs" variant="ghost" className="mt-3" onClick={() => { navigator.clipboard.writeText(ai.result); toast("Copied", "success") }}>
+                      <Copy /> Copy
+                    </Button>
+                  </div>
+                )}
+              </section>
             </div>
-          </div>
+          </SheetContent>
         )}
-      </div>
+      </Dialog>
+
+      <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} caseId={caseFilter !== "All" ? caseFilter : undefined} />
     </div>
   )
 }

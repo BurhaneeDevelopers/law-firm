@@ -1,292 +1,291 @@
 "use client"
-import { useState } from "react"
-import { ChevronLeft, ChevronRight, Plus, MessageSquare, ExternalLink } from "lucide-react"
+import { useMemo, useState } from "react"
 import {
-  format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay,
-  isToday, addMonths, subMonths, startOfWeek, endOfWeek
+  addDays, addMonths, addWeeks, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay, isSameMonth,
+  startOfMonth, startOfWeek, subMonths, subWeeks,
 } from "date-fns"
-import { cn, caseTypeColors, formatDate, generateWhatsAppMessage, getDaysUntil, getCountdownLabel } from "@/lib/utils"
-import { getHearings, getCases, getClients } from "@/lib/store"
-import { demoLawyer } from "@/lib/demo-data"
+import { CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, Printer } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Card, CardHeader } from "@/components/ui/card"
+import { EmptyState, PageHeader, Segmented } from "@/components/ui/misc"
+import { HearingRow } from "@/components/practice/hearing-row"
+import { RecordOutcomeSheet } from "@/components/practice/record-outcome-sheet"
+import { AddHearingDialog } from "@/components/practice/add-hearing-dialog"
+import { purposeTone, toneClasses, toneSolid } from "@/lib/constants"
+import { cn, formatDate, formatTime, getDaysUntil, toISODate } from "@/lib/utils"
+import { sortHearings, useDB, type Hearing } from "@/lib/store"
 
-type ViewType = "month" | "week" | "agenda"
-
-const purposeColors: Record<string, string> = {
-  Argument: "bg-indigo-500",
-  Mention: "bg-blue-500",
-  Evidence: "bg-amber-500",
-  Judgment: "bg-emerald-500",
-  "Framing of Charges": "bg-rose-500",
-  Other: "bg-slate-500",
-  Mediation: "bg-purple-500",
-}
+type View = "month" | "week" | "agenda"
+const WEEK_OPTS = { weekStartsOn: 1 as const }
 
 export default function CalendarPage() {
-  const [view, setView] = useState<ViewType>("month")
-  const [currentDate, setCurrentDate] = useState(new Date())
-  const [selectedHearing, setSelectedHearing] = useState<string | null>(null)
+  const db = useDB()
+  const [view, setView] = useState<View>("month")
+  const [cursor, setCursor] = useState(() => new Date())
+  const [selected, setSelected] = useState(() => new Date())
+  const [outcomeFor, setOutcomeFor] = useState<Hearing | null>(null)
+  const [addOpen, setAddOpen] = useState(false)
 
-  const hearings = getHearings()
-  const cases = getCases()
-  const clients = getClients()
+  const caseById = useMemo(() => new Map(db.cases.map((c) => [c.id, c])), [db.cases])
+  const clientById = useMemo(() => new Map(db.clients.map((c) => [c.id, c])), [db.clients])
+  const byDate = useMemo(() => {
+    const m = new Map<string, Hearing[]>()
+    sortHearings(db.hearings).forEach((h) => m.set(h.date, [...(m.get(h.date) ?? []), h]))
+    return m
+  }, [db.hearings])
 
-  const getHearingsForDay = (date: Date) => {
-    const dateStr = format(date, "yyyy-MM-dd")
-    return hearings.filter(h => h.date === dateStr)
+  const selectedISO = toISODate(selected)
+  const selectedHearings = byDate.get(selectedISO) ?? []
+  const upcomingCount = db.hearings.filter((h) => getDaysUntil(h.date) >= 0).length
+  const pendingReminders = db.hearings.filter((h) => {
+    const d = getDaysUntil(h.date)
+    return d >= 0 && d <= 1 && !h.reminder_sent
+  }).length
+
+  const monthDays = eachDayOfInterval({ start: startOfWeek(startOfMonth(cursor), WEEK_OPTS), end: endOfWeek(endOfMonth(cursor), WEEK_OPTS) })
+  const weekDays = eachDayOfInterval({ start: startOfWeek(cursor, WEEK_OPTS), end: endOfWeek(cursor, WEEK_OPTS) })
+  const agendaDays = eachDayOfInterval({ start: new Date(), end: addDays(new Date(), 45) })
+    .map((d) => ({ date: d, list: byDate.get(toISODate(d)) ?? [] }))
+    .filter((d) => d.list.length > 0)
+
+  const title = view === "month"
+    ? format(cursor, "MMMM yyyy")
+    : view === "week"
+      ? `${format(weekDays[0], "dd MMM")} - ${format(weekDays[6], "dd MMM yyyy")}`
+      : "Next 45 days"
+
+  const step = (dir: 1 | -1) => {
+    if (view === "month") setCursor((c) => (dir === 1 ? addMonths(c, 1) : subMonths(c, 1)))
+    if (view === "week") setCursor((c) => (dir === 1 ? addWeeks(c, 1) : subWeeks(c, 1)))
   }
 
-  const monthStart = startOfMonth(currentDate)
-  const monthEnd = endOfMonth(currentDate)
-  const calStart = startOfWeek(monthStart, { weekStartsOn: 0 })
-  const calEnd = endOfWeek(monthEnd, { weekStartsOn: 0 })
-  const calDays = eachDayOfInterval({ start: calStart, end: calEnd })
-
-  const upcomingHearings = hearings
-    .filter(h => new Date(h.date) >= new Date())
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-
-  const selectedHearingData = selectedHearing ? hearings.find(h => h.id === selectedHearing) : null
-  const selectedCase = selectedHearingData ? cases.find(c => c.id === selectedHearingData.case_id) : null
-  const selectedClient = selectedCase ? clients.find(c => c.id === selectedCase.client_id) : null
-
-  const handleWhatsApp = (hearingId: string) => {
-    const h = hearings.find(x => x.id === hearingId)
-    if (!h || !selectedClient) return
-    const msg = generateWhatsAppMessage({
-      clientName: selectedClient.full_name,
-      caseNumber: selectedCase?.case_number || "",
-      date: formatDate(h.date),
-      time: h.time,
-      court: h.court_room,
-      lawyerName: demoLawyer.name,
-    })
-    window.open(`https://wa.me/${selectedClient.phone.replace(/\D/g, "")}?text=${msg}`, "_blank")
+  const goToday = () => {
+    setCursor(new Date())
+    setSelected(new Date())
   }
 
-  const groupedAgenda = upcomingHearings.reduce<Record<string, typeof hearings>>((acc, h) => {
-    if (!acc[h.date]) acc[h.date] = []
-    acc[h.date].push(h)
-    return acc
-  }, {})
+  const pick = (d: Date) => {
+    setSelected(d)
+    if (!isSameMonth(d, cursor) && view === "month") setCursor(d)
+  }
+
+  const row = (h: Hearing, compact = false) => {
+    const c = caseById.get(h.case_id)
+    return <HearingRow key={h.id} compact={compact} hearing={h} caseData={c} client={c ? clientById.get(c.client_id) : undefined} onRecordOutcome={setOutcomeFor} />
+  }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">Calendar</h1>
-          <p className="text-sm text-slate-500">{upcomingHearings.length} upcoming hearings</p>
+    <div className="space-y-5">
+      <PageHeader
+        title="Diary"
+        description={`${upcomingCount} upcoming dates${pendingReminders ? ` · ${pendingReminders} client reminders pending for today and tomorrow` : ""}`}
+        actions={
+          <>
+            <Button variant="outline" onClick={() => window.print()} disabled={selectedHearings.length === 0} title="Print the selected day's list">
+              <Printer /> Print day list
+            </Button>
+            <Button onClick={() => setAddOpen(true)}><CalendarPlus /> Add hearing</Button>
+          </>
+        }
+      />
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="icon-sm" aria-label="Previous" onClick={() => step(-1)} disabled={view === "agenda"}><ChevronLeft /></Button>
+          <Button variant="outline" size="icon-sm" aria-label="Next" onClick={() => step(1)} disabled={view === "agenda"}><ChevronRight /></Button>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
-            {(["month", "week", "agenda"] as ViewType[]).map(v => (
-              <button key={v} onClick={() => setView(v)}
-                className={cn("px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors",
-                  view === v ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900")}>
-                {v}
-              </button>
-            ))}
-          </div>
-        </div>
+        <Button variant="outline" size="sm" onClick={goToday}>Today</Button>
+        <h2 className="ml-1 text-base font-semibold text-foreground">{title}</h2>
+        <Segmented
+          className="ml-auto"
+          ariaLabel="Calendar view"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "month", label: "Month" },
+            { value: "week", label: "Week" },
+            { value: "agenda", label: "Agenda" },
+          ]}
+        />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Calendar Main */}
-        <div className="lg:col-span-2">
-          {/* Month/Week View */}
-          {(view === "month" || view === "week") && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              {/* Nav */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-                <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="p-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-500">
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <h2 className="text-base font-bold text-slate-900">{format(currentDate, "MMMM yyyy")}</h2>
-                <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="p-2 rounded-xl hover:bg-slate-100 transition-colors text-slate-500">
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Day headers */}
-              <div className="grid grid-cols-7 border-b border-slate-100">
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => (
-                  <div key={d} className="text-center py-2 text-xs font-semibold text-slate-500">{d}</div>
-                ))}
-              </div>
-
-              {/* Days */}
-              <div className="grid grid-cols-7">
-                {calDays.map((day, i) => {
-                  const dayHearings = getHearingsForDay(day)
-                  const isCurrentMonth = day.getMonth() === currentDate.getMonth()
-                  const today = isToday(day)
-                  return (
-                    <div key={i} className={cn(
-                      "min-h-[90px] p-2 border-b border-r border-slate-50 transition-colors hover:bg-slate-50/50",
-                      !isCurrentMonth && "opacity-40",
-                      today && "bg-indigo-50/30"
-                    )}>
-                      <div className={cn(
-                        "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold mb-1 transition-colors",
-                        today ? "bg-indigo-700 text-white" : "text-slate-700 hover:bg-slate-100"
-                      )}>
-                        {format(day, "d")}
-                      </div>
-                      <div className="space-y-0.5">
-                        {dayHearings.slice(0, 2).map(h => {
-                          const c = cases.find(c => c.id === h.case_id)
-                          return (
-                            <button
-                              key={h.id}
-                              onClick={() => setSelectedHearing(h.id === selectedHearing ? null : h.id)}
-                              className={cn(
-                                "w-full text-left px-1.5 py-0.5 rounded text-[9px] font-medium text-white truncate transition-opacity",
-                                purposeColors[h.purpose] || "bg-indigo-500",
-                                selectedHearing === h.id ? "ring-2 ring-offset-1 ring-indigo-700" : ""
-                              )}
-                            >
-                              {h.time} {c?.case_number?.split("/")[0]}
-                            </button>
-                          )
-                        })}
-                        {dayHearings.length > 2 && (
-                          <span className="text-[9px] text-slate-400 font-medium">+{dayHearings.length - 2} more</span>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_400px]">
+        {view === "month" && (
+          <Card className="overflow-hidden">
+            <div className="grid grid-cols-7 border-b border-border bg-surface-2/60">
+              {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+                <div key={d} className={cn("py-2 text-center text-xs font-medium", d === "Sun" ? "text-subtle-foreground" : "text-muted-foreground")}>{d}</div>
+              ))}
             </div>
-          )}
-
-          {/* Agenda View */}
-          {view === "agenda" && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-100">
-                <h2 className="text-sm font-semibold text-slate-900">Upcoming Hearings</h2>
-              </div>
-              {Object.keys(groupedAgenda).length === 0 ? (
-                <div className="py-12 text-center text-slate-400 text-sm">No upcoming hearings</div>
-              ) : (
-                <div className="divide-y divide-slate-50">
-                  {Object.entries(groupedAgenda).map(([date, dayHearings]) => (
-                    <div key={date}>
-                      <div className="px-5 py-2 bg-slate-50 border-b border-slate-100">
-                        <p className="text-xs font-bold text-slate-600">{formatDate(date, "EEEE, dd MMMM yyyy")}</p>
-                      </div>
-                      {dayHearings.map(h => {
-                        const c = cases.find(x => x.id === h.case_id)
-                        const client = clients.find(x => x.id === c?.client_id)
-                        return (
-                          <div key={h.id} onClick={() => setSelectedHearing(h.id === selectedHearing ? null : h.id)}
-                            className={cn("flex items-start gap-4 px-5 py-3.5 hover:bg-slate-50 cursor-pointer transition-colors", selectedHearing === h.id && "bg-indigo-50/30")}>
-                            <div className={cn("w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0", purposeColors[h.purpose] || "bg-indigo-500")} />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-slate-900 truncate">{c?.title}</p>
-                              <p className="text-xs text-slate-500 mt-0.5">{client?.full_name} · {h.court_room}</p>
-                            </div>
-                            <div className="text-right flex-shrink-0">
-                              <p className="text-sm font-bold text-slate-900">{h.time}</p>
-                              <p className="text-[10px] text-slate-400">{h.purpose}</p>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Sidebar */}
-        <div className="space-y-4">
-          {/* Selected hearing detail */}
-          {selectedHearingData && (
-            <div className="bg-white rounded-2xl shadow-sm border border-indigo-100 p-5 animate-scale-in">
-              <h3 className="text-xs font-semibold text-indigo-600 uppercase tracking-wider mb-3">Hearing Details</h3>
-              <p className="text-sm font-bold text-slate-900 mb-1">{selectedCase?.title}</p>
-              <p className="text-xs text-slate-500 mb-1">{selectedCase?.case_number}</p>
-              <p className="text-xs text-slate-500 mb-3">{selectedClient?.full_name}</p>
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Date</span>
-                  <span className="font-medium text-slate-800">{formatDate(selectedHearingData.date)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Time</span>
-                  <span className="font-medium text-slate-800">{selectedHearingData.time}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Court</span>
-                  <span className="font-medium text-slate-800 text-right max-w-[150px]">{selectedHearingData.court_room}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Purpose</span>
-                  <span className="font-medium text-slate-800">{selectedHearingData.purpose}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Reminder</span>
-                  <span className={cn("font-medium", selectedHearingData.reminder_sent ? "text-emerald-600" : "text-slate-400")}>
-                    {selectedHearingData.reminder_sent ? "Sent ✓" : "Not Sent"}
-                  </span>
-                </div>
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button onClick={() => handleWhatsApp(selectedHearingData.id)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-emerald-600 text-white text-xs font-medium rounded-xl hover:bg-emerald-700 transition-colors">
-                  <MessageSquare className="w-3.5 h-3.5" /> Remind on WA
-                </button>
-                <a href={`/cases/${selectedCase?.id}`}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-indigo-50 text-indigo-700 text-xs font-medium rounded-xl hover:bg-indigo-100 transition-colors">
-                  View Case <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
-            </div>
-          )}
-
-          {/* Upcoming mini list */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-100">
-              <h3 className="text-sm font-semibold text-slate-900">Next Hearings</h3>
-            </div>
-            <div className="divide-y divide-slate-50">
-              {upcomingHearings.slice(0, 6).map(h => {
-                const c = cases.find(x => x.id === h.case_id)
-                const days = getDaysUntil(h.date)
+            <div className="grid grid-cols-7">
+              {monthDays.map((day) => {
+                const iso = toISODate(day)
+                const list = byDate.get(iso) ?? []
+                const inMonth = isSameMonth(day, cursor)
+                const isSel = isSameDay(day, selected)
+                const isTodayCell = isSameDay(day, new Date())
+                const sunday = day.getDay() === 0
                 return (
-                  <button key={h.id} onClick={() => setSelectedHearing(h.id === selectedHearing ? null : h.id)}
-                    className={cn("w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors", selectedHearing === h.id && "bg-indigo-50/40")}>
-                    <div className={cn("w-2 h-2 rounded-full flex-shrink-0", purposeColors[h.purpose] || "bg-indigo-500")} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-slate-900 truncate">{c?.case_number}</p>
-                      <p className="text-[10px] text-slate-500">{h.time} · {h.purpose}</p>
-                    </div>
-                    <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-full",
-                      days === 0 ? "bg-rose-100 text-rose-700" : days <= 3 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600")}>
-                      {getCountdownLabel(days)}
+                  <button
+                    key={iso}
+                    type="button"
+                    onClick={() => pick(day)}
+                    aria-pressed={isSel}
+                    aria-label={`${format(day, "EEEE d MMMM")}, ${list.length} hearings`}
+                    className={cn(
+                      "group relative flex min-h-[72px] flex-col items-stretch gap-1 border-b border-r border-border p-1.5 text-left transition-colors sm:min-h-[104px] sm:p-2 [&:nth-child(7n)]:border-r-0",
+                      !inMonth && "bg-surface-2/40",
+                      sunday && inMonth && "bg-surface-2/30",
+                      isSel ? "bg-primary-soft/60" : "hover:bg-surface-2/70"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "tabular flex size-6 items-center justify-center rounded-md text-xs font-medium",
+                        isTodayCell ? "bg-primary text-primary-foreground" : inMonth ? "text-foreground" : "text-subtle-foreground"
+                      )}
+                    >
+                      {format(day, "d")}
+                    </span>
+                    {/* Phone: dots. Larger screens: time and case number. */}
+                    <span className="flex flex-wrap gap-0.5 sm:hidden">
+                      {list.slice(0, 4).map((h) => (
+                        <span key={h.id} className={cn("size-1.5 rounded-full", toneSolid[purposeTone[h.purpose] ?? "neutral"])} />
+                      ))}
+                    </span>
+                    <span className="hidden space-y-0.5 sm:block">
+                      {list.slice(0, 3).map((h) => (
+                        <span key={h.id} className={cn("block truncate rounded px-1.5 py-0.5 text-[11px] font-medium", toneClasses[purposeTone[h.purpose] ?? "neutral"])}>
+                          <span className="tabular">{formatTime(h.time).replace(" ", "").toLowerCase()}</span> {caseById.get(h.case_id)?.case_number.split("/").slice(0, 2).join("/")}
+                        </span>
+                      ))}
+                      {list.length > 3 && <span className="block px-1.5 text-[11px] font-medium text-subtle-foreground">+{list.length - 3} more</span>}
                     </span>
                   </button>
                 )
               })}
             </div>
-          </div>
+          </Card>
+        )}
 
-          {/* Legend */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
-            <h3 className="text-xs font-semibold text-slate-500 uppercase mb-3">Purpose Colors</h3>
-            <div className="space-y-2">
-              {Object.entries(purposeColors).map(([purpose, color]) => (
-                <div key={purpose} className="flex items-center gap-2">
-                  <span className={cn("w-3 h-3 rounded-sm", color)} />
-                  <span className="text-xs text-slate-600">{purpose}</span>
-                </div>
-              ))}
-            </div>
+        {view === "week" && (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3">
+            {weekDays.map((day) => {
+              const list = byDate.get(toISODate(day)) ?? []
+              const isSel = isSameDay(day, selected)
+              return (
+                <button
+                  key={day.toISOString()}
+                  type="button"
+                  onClick={() => pick(day)}
+                  aria-pressed={isSel}
+                  className={cn(
+                    "rounded-2xl border bg-surface p-3 text-left transition-colors",
+                    isSel ? "border-primary ring-2 ring-primary/15" : "border-border hover:border-border-strong"
+                  )}
+                >
+                  <div className="flex items-baseline justify-between">
+                    <p className={cn("text-sm font-semibold", isSameDay(day, new Date()) ? "text-primary" : "text-foreground")}>{format(day, "EEEE")}</p>
+                    <p className="tabular text-xs text-muted-foreground">{format(day, "dd MMM")}</p>
+                  </div>
+                  {list.length === 0 ? (
+                    <p className="mt-3 text-xs text-subtle-foreground">{day.getDay() === 0 ? "Sunday" : "No hearings"}</p>
+                  ) : (
+                    <ul className="mt-2.5 space-y-1.5">
+                      {list.map((h) => {
+                        const c = caseById.get(h.case_id)
+                        return (
+                          <li key={h.id} className="flex items-start gap-2 text-xs">
+                            <span className={cn("mt-1 size-2 shrink-0 rounded-[3px]", toneSolid[purposeTone[h.purpose] ?? "neutral"])} />
+                            <span className="min-w-0">
+                              <span className="tabular font-medium text-foreground">{formatTime(h.time)}</span>{" "}
+                              <span className="font-mono text-muted-foreground">{c?.case_number}</span>
+                              <span className="block truncate text-muted-foreground">{h.purpose} · {h.court_room}</span>
+                            </span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </button>
+              )
+            })}
           </div>
-        </div>
+        )}
+
+        {view === "agenda" && (
+          <Card className="overflow-hidden">
+            {agendaDays.length === 0 ? (
+              <EmptyState icon={CalendarDays} title="Nothing listed in the next 45 days" action={<Button size="sm" onClick={() => setAddOpen(true)}><CalendarPlus /> Add hearing</Button>} />
+            ) : (
+              agendaDays.map(({ date, list }) => (
+                <section key={date.toISOString()}>
+                  <h3 className="sticky top-14 z-10 border-y border-border bg-surface-2/95 px-5 py-2 text-xs font-semibold text-foreground backdrop-blur first:border-t-0 md:top-16">
+                    {formatDate(date, "EEEE, dd MMMM")}
+                    <span className="ml-2 font-normal text-muted-foreground">
+                      {getDaysUntil(date) === 0 ? "Today" : getDaysUntil(date) === 1 ? "Tomorrow" : `In ${getDaysUntil(date)} days`}
+                    </span>
+                  </h3>
+                  <div className="divide-y divide-border">{list.map((h) => row(h))}</div>
+                </section>
+              ))
+            )}
+          </Card>
+        )}
+
+        {view !== "agenda" && (
+          <Card className="h-fit overflow-hidden xl:sticky xl:top-24">
+            <CardHeader
+              title={formatDate(selected, "EEEE, dd MMM")}
+              description={
+                getDaysUntil(selected) === 0 ? "Today" : getDaysUntil(selected) === 1 ? "Tomorrow" : `${selectedHearings.length} ${selectedHearings.length === 1 ? "hearing" : "hearings"}`
+              }
+              divider
+              action={<Button size="xs" variant="outline" onClick={() => setAddOpen(true)}><CalendarPlus /> Add</Button>}
+            />
+            {selectedHearings.length === 0 ? (
+              <EmptyState compact icon={CalendarDays} title={selected.getDay() === 0 ? "Sunday, courts closed" : "No hearings on this day"} />
+            ) : (
+              <div className="divide-y divide-border">{selectedHearings.map((h) => row(h, true))}</div>
+            )}
+          </Card>
+        )}
       </div>
+
+      {/* Printable cause list for the selected day */}
+      <div className="print-area hidden print:block">
+        <h1 style={{ fontSize: 16, fontWeight: 600 }}>{db.lawyer.firm_name}: cause list for {formatDate(selected, "EEEE, dd MMMM yyyy")}</h1>
+        <table style={{ width: "100%", marginTop: 12, borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr>
+              {["Time", "Item", "Court", "Case no.", "Title", "Client", "Purpose", "Next date"].map((h) => (
+                <th key={h} style={{ textAlign: "left", borderBottom: "1px solid #999", padding: "6px 4px" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {selectedHearings.map((h) => {
+              const c = caseById.get(h.case_id)
+              return (
+                <tr key={h.id}>
+                  <td style={{ padding: "8px 4px", borderBottom: "1px solid #ddd" }}>{formatTime(h.time)}</td>
+                  <td style={{ padding: "8px 4px", borderBottom: "1px solid #ddd" }}>{h.item_no}</td>
+                  <td style={{ padding: "8px 4px", borderBottom: "1px solid #ddd" }}>{h.court_room}</td>
+                  <td style={{ padding: "8px 4px", borderBottom: "1px solid #ddd" }}>{c?.case_number}</td>
+                  <td style={{ padding: "8px 4px", borderBottom: "1px solid #ddd" }}>{c?.title}</td>
+                  <td style={{ padding: "8px 4px", borderBottom: "1px solid #ddd" }}>{c ? clientById.get(c.client_id)?.full_name : ""}</td>
+                  <td style={{ padding: "8px 4px", borderBottom: "1px solid #ddd" }}>{h.purpose}</td>
+                  <td style={{ padding: "8px 4px", borderBottom: "1px solid #ddd", width: 90 }}>&nbsp;</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <RecordOutcomeSheet hearing={outcomeFor} onOpenChange={(o) => !o && setOutcomeFor(null)} />
+      <AddHearingDialog open={addOpen} onOpenChange={setAddOpen} defaultDate={getDaysUntil(selected) >= 0 ? selectedISO : undefined} />
     </div>
   )
 }
+

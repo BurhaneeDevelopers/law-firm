@@ -1,6 +1,6 @@
 "use client"
-import { useState, useCallback, createContext, useContext } from "react"
-import { CheckCircle, XCircle, Info, AlertTriangle, X } from "lucide-react"
+import { useState, useCallback, createContext, useContext, useRef } from "react"
+import { CircleCheck, CircleX, Info, TriangleAlert, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 type ToastType = "success" | "error" | "info" | "warning"
@@ -22,58 +22,72 @@ export function useToast() {
   return useContext(ToastContext)
 }
 
-const icons = {
-  success: <CheckCircle className="w-4 h-4 text-emerald-600" />,
-  error: <XCircle className="w-4 h-4 text-rose-600" />,
-  info: <Info className="w-4 h-4 text-indigo-600" />,
-  warning: <AlertTriangle className="w-4 h-4 text-amber-600" />,
-}
-
-const styles = {
-  success: "border-emerald-200 bg-white",
-  error: "border-rose-200 bg-white",
-  info: "border-indigo-200 bg-white",
-  warning: "border-amber-200 bg-white",
+const icons: Record<ToastType, React.ReactNode> = {
+  success: <CircleCheck className="size-[18px] text-success" />,
+  error: <CircleX className="size-[18px] text-danger" />,
+  info: <Info className="size-[18px] text-primary" />,
+  warning: <TriangleAlert className="size-[18px] text-warning" />,
 }
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
 
-  const toast = useCallback((message: string, type: ToastType = "info", action?: Toast["action"]) => {
-    const id = Math.random().toString(36).slice(2)
-    setToasts(prev => [...prev, { id, type, message, action }])
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000)
+  const dismiss = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id))
+    const timer = timers.current.get(id)
+    if (timer) clearTimeout(timer)
+    timers.current.delete(id)
   }, [])
+
+  const toast = useCallback(
+    (message: string, type: ToastType = "info", action?: Toast["action"]) => {
+      const id = Math.random().toString(36).slice(2)
+      setToasts((prev) => [...prev.slice(-3), { id, type, message, action }])
+      timers.current.set(id, setTimeout(() => dismiss(id), action ? 6000 : 3800))
+    },
+    [dismiss]
+  )
 
   return (
     <ToastContext.Provider value={{ toast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm w-full">
-        {toasts.map(t => (
+      <div
+        aria-live="polite"
+        aria-atomic="false"
+        className="pointer-events-none fixed inset-x-4 bottom-24 z-(--z-toast) flex flex-col items-center gap-2 md:inset-x-auto md:bottom-6 md:right-6 md:items-end"
+      >
+        {toasts.map((t) => (
           <div
             key={t.id}
+            role={t.type === "error" ? "alert" : "status"}
             className={cn(
-              "flex items-start gap-3 p-3.5 rounded-xl border shadow-lg animate-slide-up",
-              styles[t.type]
+              "pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-xl border border-border bg-surface p-3.5 shadow-lg animate-rise"
             )}
           >
-            {icons[t.type]}
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-slate-800 leading-snug">{t.message}</p>
+            <span className="mt-px">{icons[t.type]}</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm leading-snug text-foreground">{t.message}</p>
               {t.action && (
                 <button
-                  onClick={t.action.onClick}
-                  className="text-xs font-semibold text-indigo-600 mt-1 hover:text-indigo-700"
+                  type="button"
+                  onClick={() => {
+                    t.action?.onClick()
+                    dismiss(t.id)
+                  }}
+                  className="mt-1 text-[13px] font-semibold text-primary hover:underline"
                 >
                   {t.action.label}
                 </button>
               )}
             </div>
             <button
-              onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))}
-              className="text-slate-400 hover:text-slate-600"
+              type="button"
+              onClick={() => dismiss(t.id)}
+              aria-label="Dismiss"
+              className="-mr-1 -mt-0.5 flex size-6 items-center justify-center rounded-md text-subtle-foreground hover:bg-surface-2 hover:text-foreground"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="size-3.5" />
             </button>
           </div>
         ))}

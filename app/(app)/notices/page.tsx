@@ -1,127 +1,117 @@
 "use client"
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
-import { Plus, Search, Eye, Download, MessageSquare, Trash2 } from "lucide-react"
-import { cn, formatDate, formatRelativeTime } from "@/lib/utils"
-import { getNotices, getCases, deleteNotice } from "@/lib/store"
+import { useRouter } from "next/navigation"
+import { Ellipsis, Eye, MailCheck, Plus, ScrollText, Trash2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { SearchInput } from "@/components/ui/field"
+import { EmptyState, PageHeader, Segmented } from "@/components/ui/misc"
+import { Dropdown, DropdownContent, DropdownItem, DropdownSeparator, DropdownTrigger } from "@/components/ui/dropdown"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import { useToast } from "@/components/ui/toast"
+import { formatDate } from "@/lib/utils"
+import { deleteNotice, updateNotice, useDB, type Notice } from "@/lib/store"
+
+type StatusFilter = "All" | "Draft" | "Sent"
 
 export default function NoticesPage() {
-  const [search, setSearch] = useState("")
-  const [filterStatus, setFilterStatus] = useState("All")
-  const [filterType, setFilterType] = useState("All")
+  const db = useDB()
+  const router = useRouter()
   const { confirm, dialogElement } = useConfirmDialog()
   const { toast } = useToast()
-  const [notices, setNotices] = useState(() => getNotices())
-  const cases = getCases()
+  const [search, setSearch] = useState("")
+  const [status, setStatus] = useState<StatusFilter>("All")
 
-  const filtered = notices.filter(n => {
-    const q = search.toLowerCase()
-    const matchSearch = !q || n.title.toLowerCase().includes(q) || n.notice_type.toLowerCase().includes(q)
-    const matchStatus = filterStatus === "All" || n.status === filterStatus
-    const matchType = filterType === "All" || n.notice_type === filterType
-    return matchSearch && matchStatus && matchType
-  })
+  const caseById = useMemo(() => new Map(db.cases.map((c) => [c.id, c])), [db.cases])
+  const drafts = db.notices.filter((n) => n.status === "Draft").length
 
-  const noticeTypes = ["All", ...Array.from(new Set(notices.map(n => n.notice_type)))]
+  const filtered = db.notices
+    .filter((n) => {
+      const q = search.trim().toLowerCase()
+      const c = caseById.get(n.case_id)
+      const matchQ = !q || [n.title, n.notice_type, n.recipient_name, c?.case_number].some((f) => f?.toLowerCase().includes(q))
+      return matchQ && (status === "All" || n.status === status)
+    })
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
 
-  const handleDelete = (id: string, title: string) => {
-    confirm("Delete Notice", `Permanently delete "${title}"? This cannot be undone.`, () => {
-      deleteNotice(id)
-      setNotices(getNotices())
+  const remove = (n: Notice) =>
+    confirm("Delete notice?", `"${n.title}" will be permanently deleted.`, () => {
+      deleteNotice(n.id)
       toast("Notice deleted", "success")
     })
+
+  const markSent = (n: Notice) => {
+    updateNotice(n.id, { status: "Sent" })
+    toast("Marked as sent", "success")
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5 animate-fade-in">
+    <div className="space-y-5">
       {dialogElement}
+      <PageHeader
+        title="Notices"
+        description={`${db.notices.length} notices${drafts ? ` · ${drafts} ${drafts === 1 ? "draft" : "drafts"} waiting to be sent` : ""}`}
+        actions={<Button asChild><Link href="/notices/new"><Plus /> Draft notice</Link></Button>}
+      />
 
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">Legal Notices</h1>
-          <p className="text-sm text-slate-500">{filtered.length} notices</p>
-        </div>
-        <Link href="/notices/new" className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-700 text-white text-sm font-medium rounded-xl hover:bg-indigo-800 transition-colors">
-          <Plus className="w-4 h-4" /> Generate Notice
-        </Link>
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
+        <SearchInput className="sm:max-w-sm sm:flex-1" value={search} onChange={setSearch} placeholder="Search title, recipient, case" />
+        <Segmented
+          className="sm:ml-auto"
+          ariaLabel="Status"
+          value={status}
+          onChange={setStatus}
+          options={(["All", "Draft", "Sent"] as const).map((s) => ({
+            value: s,
+            label: `${s}${s === "All" ? "" : ` · ${db.notices.filter((n) => n.status === s).length}`}`,
+          }))}
+        />
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-wrap gap-3 items-center">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search notices..."
-            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400" />
-        </div>
-        <select value={filterType} onChange={e => setFilterType(e.target.value)}
-          className="px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 bg-white">
-          {noticeTypes.map(t => <option key={t}>{t}</option>)}
-        </select>
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-          className="px-3 py-2 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 bg-white">
-          {["All", "Draft", "Sent"].map(s => <option key={s}>{s}</option>)}
-        </select>
-      </div>
-
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-100">
-              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Title</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Type</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Case</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Date</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
-              <th className="px-4 py-3"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="text-center py-12 text-sm text-slate-400">No notices found</td></tr>
-            ) : filtered.map(n => {
-              const c = cases.find(c => c.id === n.case_id)
+      <Card className="overflow-hidden">
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon={ScrollText}
+            title={db.notices.length ? "No notices match" : "No notices yet"}
+            description="Draft demand notices, Section 138 notices, replies and vakalatnamas from templates."
+            action={<Button asChild size="sm"><Link href="/notices/new"><Plus /> Draft notice</Link></Button>}
+          />
+        ) : (
+          <ul className="divide-y divide-border">
+            {filtered.map((n) => {
+              const c = caseById.get(n.case_id)
               return (
-                <tr key={n.id} className="table-row-hover group">
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-slate-900 text-sm">{n.title}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium border border-indigo-100">
+                <li key={n.id} className="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-surface-2/60">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted-foreground">
+                    <ScrollText className="size-4" />
+                  </span>
+                  <Link href={`/notices/${n.id}`} className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-foreground hover:text-primary">{n.title}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
                       {n.notice_type}
+                      {c ? <> · <span className="font-mono">{c.case_number}</span></> : null} · {formatDate(n.created_at)}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{c?.case_number || "—"}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{formatDate(n.created_at)}</td>
-                  <td className="px-4 py-3">
-                    <span className={cn("text-xs font-medium px-2 py-0.5 rounded-full",
-                      n.status === "Sent" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-slate-100 text-slate-600")}>
-                      {n.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Link href={`/notices/${n.id}`} className="p-1.5 rounded-lg hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 transition-colors">
-                        <Eye className="w-3.5 h-3.5" />
-                      </Link>
-                      <button className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors">
-                        <Download className="w-3.5 h-3.5" />
-                      </button>
-                      <button className="p-1.5 rounded-lg hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 transition-colors">
-                        <MessageSquare className="w-3.5 h-3.5" />
-                      </button>
-                      <button onClick={() => handleDelete(n.id, n.title)} className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                  </Link>
+                  <Badge tone={n.status === "Sent" ? "success" : "warning"}>{n.status}</Badge>
+                  <Dropdown>
+                    <DropdownTrigger asChild>
+                      <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${n.title}`}><Ellipsis /></Button>
+                    </DropdownTrigger>
+                    <DropdownContent className="w-44">
+                      <DropdownItem onSelect={() => router.push(`/notices/${n.id}`)}><Eye /> Open</DropdownItem>
+                      {n.status === "Draft" && <DropdownItem onSelect={() => markSent(n)}><MailCheck /> Mark as sent</DropdownItem>}
+                      <DropdownSeparator />
+                      <DropdownItem onSelect={() => remove(n)} className="text-danger-soft-foreground [&_svg]:text-danger"><Trash2 /> Delete</DropdownItem>
+                    </DropdownContent>
+                  </Dropdown>
+                </li>
               )
             })}
-          </tbody>
-        </table>
-      </div>
+          </ul>
+        )}
+      </Card>
     </div>
   )
 }

@@ -1,12 +1,12 @@
 import { cn } from "@/lib/utils"
 
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("skeleton rounded", className)} />
+  return <div aria-hidden className={cn("skeleton", className)} />
 }
 
 export function CardSkeleton() {
   return (
-    <div className="bg-white rounded-xl p-5 shadow-sm space-y-3">
+    <div className="space-y-3 rounded-2xl border border-border bg-surface p-5">
       <Skeleton className="h-4 w-24" />
       <Skeleton className="h-8 w-16" />
       <Skeleton className="h-3 w-32" />

@@ -1,102 +1,202 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { formatDistanceToNow, format, differenceInDays } from "date-fns"
+import { differenceInCalendarDays, format, formatDistanceToNow, isValid, parseISO } from "date-fns"
+import type { Language, Tone } from "./constants"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatRelativeTime(dateStr: string) {
-  try {
-    return formatDistanceToNow(new Date(dateStr), { addSuffix: true })
-  } catch {
-    return dateStr
-  }
+// ---- Dates -----------------------------------------------------------------
+// Date-only strings ("2026-05-08") must be read as local dates. `new Date("2026-05-08")`
+// is UTC midnight, which is 05:30 IST and shifts day math by one near midnight.
+
+export function toDate(value: string | Date) {
+  if (value instanceof Date) return value
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? parseISO(value) : new Date(value)
 }
 
-export function formatDate(dateStr: string, fmt = "dd MMM yyyy") {
-  try {
-    return format(new Date(dateStr), fmt)
-  } catch {
-    return dateStr
-  }
+export function todayISO() {
+  return format(new Date(), "yyyy-MM-dd")
 }
 
-export function getDaysUntil(dateStr: string) {
-  try {
-    return differenceInDays(new Date(dateStr), new Date())
-  } catch {
-    return 0
-  }
+export function toISODate(date: Date) {
+  return format(date, "yyyy-MM-dd")
 }
 
-export function getCountdownClass(daysUntil: number) {
-  if (daysUntil <= 1) return "countdown-danger"
-  if (daysUntil <= 3) return "countdown-warning"
-  return "countdown-safe"
+export function formatDate(value: string | Date, fmt = "dd MMM yyyy") {
+  const d = toDate(value)
+  return isValid(d) ? format(d, fmt) : String(value)
 }
 
-export function getCountdownLabel(daysUntil: number) {
-  if (daysUntil < 0) return `${Math.abs(daysUntil)} days overdue`
-  if (daysUntil === 0) return "Today"
-  if (daysUntil === 1) return "Tomorrow"
-  return `${daysUntil} days left`
+export function formatRelativeTime(value: string | Date) {
+  const d = toDate(value)
+  return isValid(d) ? formatDistanceToNow(d, { addSuffix: true }) : String(value)
 }
 
-export const caseTypeColors: Record<string, string> = {
-  Criminal: "bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-800",
-  Divorce: "bg-purple-100 text-purple-700 border border-purple-200 dark:bg-purple-950 dark:text-purple-300 dark:border-purple-800",
-  Property: "bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800",
-  Civil: "bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800",
+/** Whole calendar days from today. 0 = today, 1 = tomorrow, -2 = two days ago. */
+export function getDaysUntil(value: string | Date) {
+  const d = toDate(value)
+  return isValid(d) ? differenceInCalendarDays(d, new Date()) : 0
 }
 
-export const caseTypeDotColors: Record<string, string> = {
-  Criminal: "bg-rose-500 dark:bg-rose-400",
-  Divorce: "bg-purple-500 dark:bg-purple-400",
-  Property: "bg-amber-500 dark:bg-amber-400",
-  Civil: "bg-blue-500 dark:bg-blue-400",
+export function isUpcoming(value: string | Date) {
+  return getDaysUntil(value) >= 0
 }
 
-export const statusColors: Record<string, string> = {
-  Active: "bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800",
-  "Hearing Scheduled": "bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800",
-  "Judgment Awaited": "bg-orange-50 text-orange-700 border border-orange-200 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-800",
-  Closed: "bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700",
-  Won: "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800",
+export function getCountdownLabel(days: number) {
+  if (days < -1) return `${Math.abs(days)} days overdue`
+  if (days === -1) return "1 day overdue"
+  if (days === 0) return "Today"
+  if (days === 1) return "Tomorrow"
+  return `In ${days} days`
 }
 
-export const statusDotColors: Record<string, string> = {
-  Active: "bg-indigo-500 dark:bg-indigo-400",
-  "Hearing Scheduled": "bg-amber-500 dark:bg-amber-400",
-  "Judgment Awaited": "bg-orange-500 dark:bg-orange-400",
-  Closed: "bg-slate-400 dark:bg-slate-500",
-  Won: "bg-emerald-500 dark:bg-emerald-400",
+export function getCountdownTone(days: number): Tone {
+  if (days <= 1) return "danger"
+  if (days <= 3) return "warning"
+  return "success"
 }
+
+export function getRelativeDayLabel(value: string | Date) {
+  const days = getDaysUntil(value)
+  if (days === 0) return "Today"
+  if (days === 1) return "Tomorrow"
+  if (days === -1) return "Yesterday"
+  return formatDate(value, "EEE, dd MMM")
+}
+
+// ---- Time ------------------------------------------------------------------
+
+/** Minutes since midnight. Accepts "14:30", "2:30 PM" and "02:30 PM". */
+export function timeToMinutes(time: string) {
+  const match = time.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i)
+  if (!match) return 0
+  let h = Number(match[1])
+  const m = Number(match[2])
+  const meridiem = match[3]?.toUpperCase()
+  if (meridiem === "PM" && h !== 12) h += 12
+  if (meridiem === "AM" && h === 12) h = 0
+  return h * 60 + m
+}
+
+export function formatTime(time: string) {
+  if (!time) return ""
+  const total = timeToMinutes(time)
+  const h24 = Math.floor(total / 60)
+  const m = total % 60
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12
+  return `${h12}:${String(m).padStart(2, "0")} ${h24 < 12 ? "AM" : "PM"}`
+}
+
+// ---- Money (Indian grouping: 1,25,000) --------------------------------------
+
+const inrFormatter = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })
+
+export function formatINR(amount: number) {
+  return inrFormatter.format(Math.round(amount || 0))
+}
+
+/** Compact form for stat tiles: ₹1.2L, ₹45K, ₹2.3Cr. */
+export function formatINRCompact(amount: number) {
+  const n = Math.abs(amount || 0)
+  if (n >= 1e7) return `₹${(amount / 1e7).toFixed(1).replace(/\.0$/, "")}Cr`
+  if (n >= 1e5) return `₹${(amount / 1e5).toFixed(1).replace(/\.0$/, "")}L`
+  if (n >= 1e3) return `₹${(amount / 1e3).toFixed(1).replace(/\.0$/, "")}K`
+  return formatINR(amount)
+}
+
+// ---- People ----------------------------------------------------------------
 
 export function getInitials(name: string) {
-  return name.split(" ").slice(0, 2).map(n => n[0]).join("").toUpperCase()
+  return name
+    .replace(/^(Adv\.|Advocate|Shri|Smt\.|Mr\.|Mrs\.|Ms\.)\s+/i, "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
 }
 
-export const avatarColors = [
-  "bg-indigo-500", "bg-purple-500", "bg-rose-500", "bg-amber-500",
-  "bg-emerald-500", "bg-blue-500", "bg-pink-500", "bg-teal-500",
-]
+const avatarTones: Tone[] = ["primary", "violet", "info", "success", "accent", "danger"]
 
-export function getAvatarColor(name: string) {
+export function getAvatarTone(name: string): Tone {
   let sum = 0
   for (const c of name) sum += c.charCodeAt(0)
-  return avatarColors[sum % avatarColors.length]
+  return avatarTones[sum % avatarTones.length]
 }
 
-export function generateWhatsAppMessage(params: {
-  clientName: string
-  caseNumber: string
-  date: string
-  time: string
-  court: string
-  lawyerName: string
-}) {
-  return encodeURIComponent(
-    `Dear ${params.clientName},\n\nThis is a reminder that your hearing for case ${params.caseNumber} is scheduled on ${params.date} at ${params.time} at ${params.court}.\n\nPlease ensure you are present on time.\n\nRegards,\nAdvocate ${params.lawyerName}`
-  )
+/** Digits only, with India country code, for wa.me and tel: links. */
+export function phoneDigits(phone: string) {
+  const digits = phone.replace(/\D/g, "")
+  if (digits.length === 10) return `91${digits}`
+  return digits
+}
+
+export function whatsappLink(phone: string, text?: string) {
+  const base = `https://wa.me/${phoneDigits(phone)}`
+  return text ? `${base}?text=${encodeURIComponent(text)}` : base
+}
+
+export function isValidIndianMobile(phone: string) {
+  const digits = phone.replace(/\D/g, "")
+  const local = digits.startsWith("91") && digits.length === 12 ? digits.slice(2) : digits
+  return /^[6-9]\d{9}$/.test(local)
+}
+
+export function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)
+}
+
+export function maskId(value: string) {
+  const clean = value.replace(/\s/g, "")
+  if (clean.length <= 4) return value
+  return `${"•".repeat(Math.max(0, clean.length - 4))}${clean.slice(-4)}`
+}
+
+// ---- Messages --------------------------------------------------------------
+
+export function hearingReminderMessage(
+  params: {
+    clientName: string
+    caseNumber: string
+    date: string
+    time: string
+    court: string
+    lawyerName: string
+  },
+  language: Language = "English"
+) {
+  const date = formatDate(params.date, "dd MMM yyyy (EEEE)")
+  const time = formatTime(params.time)
+  if (language === "Hindi") {
+    return `नमस्ते ${params.clientName} जी,\n\nआपके केस ${params.caseNumber} की सुनवाई ${date} को ${time} बजे ${params.court} में है।\n\nकृपया समय से 30 मिनट पहले पहुँचें और अपना पहचान पत्र साथ लाएँ।\n\nधन्यवाद,\nएडवोकेट ${params.lawyerName}`
+  }
+  return `Dear ${params.clientName},\n\nThis is a reminder that your hearing in case ${params.caseNumber} is listed on ${date} at ${time} at ${params.court}.\n\nPlease reach 30 minutes early and carry a photo ID.\n\nRegards,\nAdvocate ${params.lawyerName}`
+}
+
+export function nextDateMessage(
+  params: {
+    clientName: string
+    caseNumber: string
+    outcome: string
+    nextDate?: string
+    lawyerName: string
+  },
+  language: Language = "English"
+) {
+  const next = params.nextDate ? formatDate(params.nextDate, "dd MMM yyyy") : ""
+  if (language === "Hindi") {
+    return `नमस्ते ${params.clientName} जी,\n\nआज आपके केस ${params.caseNumber} में: ${params.outcome}.${next ? `\nअगली तारीख: ${next}` : ""}\n\nधन्यवाद,\nएडवोकेट ${params.lawyerName}`
+  }
+  return `Dear ${params.clientName},\n\nUpdate on case ${params.caseNumber}: ${params.outcome}.${next ? `\nNext date of hearing: ${next}` : ""}\n\nRegards,\nAdvocate ${params.lawyerName}`
+}
+
+/** Minimal markdown for AI output: **bold** runs inside a line. */
+export function splitBold(line: string) {
+  return line.split(/(\*\*[^*]+\*\*)/g).map((part) => ({
+    bold: part.startsWith("**") && part.endsWith("**"),
+    text: part.replace(/^\*\*|\*\*$/g, ""),
+  }))
 }

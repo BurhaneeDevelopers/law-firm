@@ -1,251 +1,230 @@
 "use client"
-import { useState, useRef, useEffect } from "react"
-import { Send, Sparkles, Copy, Check, FileText, ArrowRight, Paperclip, Mic } from "lucide-react"
-import { cn, formatRelativeTime } from "@/lib/utils"
-import { getAIMessages, addAIMessage } from "@/lib/store"
-import { callGemini } from "@/lib/gemini"
+import { useEffect, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
+import { ArrowUp, Bot, Check, Copy, RotateCcw, ScrollText, Sparkles } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Select } from "@/components/ui/field"
+import { Avatar } from "@/components/ui/misc"
 import { useToast } from "@/components/ui/toast"
+import { useConfirmDialog } from "@/components/ui/confirm-dialog"
+import { AIText } from "@/components/practice/ai-text"
+import { AI_DRAFT_KEY } from "@/lib/constants"
+import { cn, formatDate, formatRelativeTime } from "@/lib/utils"
+import { addAIMessage, clearAIMessages, getNextHearing, useDB } from "@/lib/store"
+import { callGemini } from "@/lib/gemini"
 
-const SUGGESTED_PROMPTS = [
-  "Summarize my pending cases",
-  "What documents are pending review?",
-  "List all hearings this week",
-  "Draft a bail application reminder",
-  "Generate a client update message",
-  "What are grounds for property dispute?",
+const SUGGESTIONS = [
+  { group: "Prepare", items: ["Prepare me for tomorrow's hearings", "Summarise my urgent matters", "Which cases have no next date?"] },
+  { group: "Draft", items: ["Draft a hearing reminder for a client in Hindi", "Draft an adjournment application", "Reply to a Section 138 NI Act notice"] },
+  { group: "Research", items: ["Twin conditions for bail under Section 37 NDPS", "Limitation for a money recovery suit", "BNSS equivalent of Section 438 CrPC"] },
 ]
 
 export default function AIAssistantPage() {
-  const [messages, setMessages] = useState(() => getAIMessages())
-  const [input, setInput] = useState("")
+  const db = useDB()
+  const router = useRouter()
+  const { toast } = useToast()
+  const { confirm, dialogElement } = useConfirmDialog()
+  const [input, setInput] = useState(() => new URLSearchParams(window.location.search).get("prompt") ?? "")
+  const [contextCase, setContextCase] = useState("")
   const [loading, setLoading] = useState(false)
-  const [copiedId, setCopiedId] = useState<number | null>(null)
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const { toast } = useToast()
+
+  const messages = db.aiMessages
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+  }, [messages.length, loading])
 
-  // Auto-fill from URL param
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search)
-      const prompt = params.get("prompt")
-      if (prompt) setInput(prompt)
-    }
-  }, [])
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`
+  }, [input])
 
-  const handleSend = async (msg?: string) => {
-    const text = msg || input.trim()
-    if (!text) return
+  const buildContext = () => {
+    const c = db.cases.find((x) => x.id === contextCase)
+    if (!c) return ""
+    const client = db.clients.find((x) => x.id === c.client_id)
+    const next = getNextHearing(c.id, db.hearings)
+    return `[Case context]\n${c.case_number}: ${c.title}\nCourt: ${c.court}, ${c.judge}\nStatus: ${c.status}\nClient: ${client?.full_name ?? ""}\nOpposite party: ${c.opposing_party}\nFacts: ${c.description}\nNext date: ${next ? `${next.date} for ${next.purpose}` : "not listed"}\n\n`
+  }
 
-    const userMsg = { role: "user", content: text, timestamp: new Date().toISOString() }
-    const updatedMessages = [...messages, userMsg]
-    setMessages(updatedMessages)
-    addAIMessage(userMsg)
+  const buildPracticeContext = () => {
+    const upcoming = db.hearings
+      .filter((h) => {
+        const d = new Date(h.date).getTime() - Date.now()
+        return d > -86400000 && d < 7 * 86400000
+      })
+      .map((h) => {
+        const c = db.cases.find((x) => x.id === h.case_id)
+        return `${h.date} ${h.time} ${c?.case_number} ${c?.title} (${h.purpose}, ${h.court_room})`
+      })
+    return `[Practice context: hearings in the next 7 days]\n${upcoming.join("\n")}\n\n`
+  }
+
+  const send = async (text?: string) => {
+    const content = (text ?? input).trim()
+    if (!content || loading) return
+    addAIMessage({ role: "user", content, timestamp: new Date().toISOString() })
     setInput("")
     setLoading(true)
-
-    // Build context
-    let prompt = text
-    if (text.startsWith("/case ")) {
-      const caseName = text.replace("/case ", "")
-      prompt = `[Regarding case: ${caseName}]\n\n${text}`
-    }
-    if (text.startsWith("/document ")) {
-      const docName = text.replace("/document ", "")
-      prompt = `[Regarding document: ${docName}]\n\n${text}`
-    }
-
-    const response = await callGemini(prompt)
-    const aiMsg = { role: "assistant", content: response, timestamp: new Date().toISOString() }
-    const finalMessages = [...updatedMessages, aiMsg]
-    setMessages(finalMessages)
-    addAIMessage(aiMsg)
+    const practiceHint = /tomorrow|today|urgent|hearing|next date|week/i.test(content) ? buildPracticeContext() : ""
+    const response = await callGemini(`${buildContext()}${practiceHint}${content}`)
+    addAIMessage({ role: "assistant", content: response, timestamp: new Date().toISOString() })
     setLoading(false)
+    inputRef.current?.focus()
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
+  const copy = async (text: string, idx: number) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedIdx(idx)
+      setTimeout(() => setCopiedIdx(null), 1500)
+    } catch {
+      toast("Could not copy", "error")
     }
   }
 
-  const handleCopy = (content: string, idx: number) => {
-    navigator.clipboard.writeText(content)
-    setCopiedId(idx)
-    setTimeout(() => setCopiedId(null), 2000)
-    toast("Copied to clipboard", "success")
+  const sendToNotice = (text: string) => {
+    try { sessionStorage.setItem(AI_DRAFT_KEY, text) } catch { /* ignore */ }
+    router.push(`/notices/new?from=ai${contextCase ? `&case=${contextCase}` : ""}`)
   }
 
-  const renderMessage = (content: string) => {
-    return content.split("\n").map((line, i) => {
-      if (line.startsWith("**") && line.endsWith("**")) {
-        return <p key={i} className="font-bold text-slate-900 mt-2 mb-1">{line.replace(/\*\*/g, "")}</p>
-      }
-      if (line.startsWith("- ") || line.startsWith("• ")) {
-        return <p key={i} className="flex gap-2 text-slate-700 leading-relaxed"><span className="mt-1 w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" />{line.replace(/^[•\-]\s/, "")}</p>
-      }
-      if (line.match(/^\d+\./)) {
-        return <p key={i} className="text-slate-700 leading-relaxed">{line}</p>
-      }
-      if (line.trim() === "") return <br key={i} />
-      return <p key={i} className="text-slate-700 leading-relaxed">{line.replace(/\*\*/g, "")}</p>
-    })
-  }
+  const contextLabel = db.cases.find((c) => c.id === contextCase)
 
   return (
-    <div className="max-w-4xl mx-auto h-[calc(100vh-8rem)] flex flex-col animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-4 flex-shrink-0">
-        <div className="w-10 h-10 rounded-2xl bg-indigo-700 flex items-center justify-center">
-          <Sparkles className="w-5 h-5 text-white" />
+    <div className="mx-auto flex h-[calc(100dvh-12.5rem)] max-w-3xl flex-col md:h-[calc(100dvh-8.5rem)]">
+      {dialogElement}
+      <div className="flex flex-wrap items-center gap-3 pb-4">
+        <div className="flex items-center gap-2.5">
+          <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground"><Sparkles className="size-[18px]" /></span>
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">LexAI</h1>
+            <p className="text-xs text-muted-foreground">Research and drafting help for your practice</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-lg font-bold text-slate-900">LexAI Assistant</h1>
-          <p className="text-xs text-slate-500">Your AI-powered legal research and drafting assistant</p>
-        </div>
-        <div className="ml-auto flex items-center gap-1.5">
-          <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-          <span className="text-xs text-emerald-600 font-medium">Active</span>
+        <div className="ml-auto flex items-center gap-2">
+          <Select aria-label="Case context" value={contextCase} onChange={(e) => setContextCase(e.target.value)} className="h-9 w-48 text-[13px] sm:w-60">
+            <option value="">No case context</option>
+            {db.cases.map((c) => <option key={c.id} value={c.id}>{c.case_number}</option>)}
+          </Select>
+          {messages.length > 0 && (
+            <Button variant="ghost" size="icon" aria-label="Clear conversation" onClick={() => confirm("Clear conversation?", "All messages in this chat will be removed.", () => clearAIMessages(), "Clear")}>
+              <RotateCcw />
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-4 pb-4">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center pb-8">
-            <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center mb-4 shadow-lg">
-              <Sparkles className="w-8 h-8 text-white" />
-            </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-2">How can I assist you today?</h2>
-            <p className="text-sm text-slate-500 max-w-xs">Ask me about your cases, draft legal notices, research provisions, or summarize documents.</p>
-            <div className="grid grid-cols-2 gap-2 mt-6">
-              {SUGGESTED_PROMPTS.slice(0, 4).map(p => (
-                <button key={p} onClick={() => handleSend(p)}
-                  className="text-xs bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-700 px-3 py-2.5 rounded-xl transition-all text-left shadow-sm">
-                  {p}
-                </button>
+      <div className="-mx-4 flex-1 overflow-y-auto px-4" aria-live="polite">
+        {messages.length === 0 ? (
+          <div className="flex min-h-full flex-col justify-center py-8">
+            <h2 className="text-xl font-semibold text-foreground">What are you working on?</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Pick a case above to give LexAI the facts, or start with one of these.</p>
+            <div className="mt-6 grid gap-5 sm:grid-cols-3">
+              {SUGGESTIONS.map((g) => (
+                <div key={g.group}>
+                  <p className="mb-2 text-xs font-medium text-subtle-foreground">{g.group}</p>
+                  <div className="space-y-1.5">
+                    {g.items.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => send(p)}
+                        className="block w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-left text-[13px] leading-snug text-foreground shadow-xs transition-colors hover:border-primary/40 hover:bg-primary-soft/40"
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
-        )}
-
-        {messages.map((msg, idx) => (
-          <div key={idx} className={cn("flex gap-3 animate-fade-in", msg.role === "user" ? "justify-end" : "justify-start")}>
-            {msg.role === "assistant" && (
-              <div className="w-8 h-8 rounded-xl bg-indigo-700 flex items-center justify-center flex-shrink-0 mt-1">
-                <Sparkles className="w-4 h-4 text-white" />
+        ) : (
+          <div className="space-y-6 pb-4">
+            {messages.map((m, i) =>
+              m.role === "user" ? (
+                <div key={i} className="flex justify-end gap-2.5 animate-rise">
+                  <div className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground">
+                    <p className="whitespace-pre-line">{m.content}</p>
+                  </div>
+                  <Avatar name={db.lawyer.name} size="sm" className="hidden sm:inline-flex" />
+                </div>
+              ) : (
+                <div key={i} className="flex gap-3 animate-rise">
+                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary-soft-foreground">
+                    <Bot className="size-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="rounded-2xl rounded-tl-md border border-border bg-surface px-4 py-3 shadow-xs">
+                      <AIText content={m.content} />
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-1">
+                      <span className="mr-1 text-xs text-subtle-foreground">{formatRelativeTime(m.timestamp)}</span>
+                      <Button size="xs" variant="ghost" onClick={() => copy(m.content, i)}>
+                        {copiedIdx === i ? <><Check /> Copied</> : <><Copy /> Copy</>}
+                      </Button>
+                      <Button size="xs" variant="ghost" onClick={() => sendToNotice(m.content)}>
+                        <ScrollText /> Use in notice
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
+            {loading && (
+              <div className="flex gap-3">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary-soft-foreground"><Bot className="size-4" /></span>
+                <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-md border border-border bg-surface px-4 py-3" aria-label="LexAI is writing">
+                  {[0, 150, 300].map((d) => (
+                    <span key={d} className="size-1.5 animate-bounce rounded-full bg-subtle-foreground" style={{ animationDelay: `${d}ms` }} />
+                  ))}
+                </div>
               </div>
             )}
-            <div className={cn("max-w-[80%]", msg.role === "user" ? "items-end" : "items-start")}>
-              <div className={cn(
-                "px-4 py-3 text-sm leading-relaxed",
-                msg.role === "user" ? "chat-user" : "chat-ai"
-              )}>
-                {msg.role === "user" ? (
-                  <p>{msg.content}</p>
-                ) : (
-                  <div className="space-y-0.5">{renderMessage(msg.content)}</div>
-                )}
-              </div>
-              <div className={cn("flex items-center gap-2 mt-1.5 px-1", msg.role === "user" ? "justify-end" : "justify-start")}>
-                <span className="text-[10px] text-slate-400">{formatRelativeTime(msg.timestamp)}</span>
-                {msg.role === "assistant" && (
-                  <>
-                    <button onClick={() => handleCopy(msg.content, idx)}
-                      className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-600 transition-colors">
-                      {copiedId === idx ? <><Check className="w-3 h-3 text-emerald-500" /> Copied</> : <><Copy className="w-3 h-3" /> Copy</>}
-                    </button>
-                    <button
-                      onClick={() => {
-                        const encoded = encodeURIComponent(msg.content.slice(0, 200))
-                        window.location.href = `/notices/new`
-                      }}
-                      className="flex items-center gap-1 text-[10px] text-indigo-500 hover:text-indigo-700 transition-colors"
-                    >
-                      <FileText className="w-3 h-3" /> Use in Notice
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-            {msg.role === "user" && (
-              <div className="w-8 h-8 rounded-xl bg-indigo-700 flex items-center justify-center flex-shrink-0 mt-1 text-white text-xs font-bold">
-                M
-              </div>
-            )}
-          </div>
-        ))}
-
-        {loading && (
-          <div className="flex gap-3 animate-fade-in">
-            <div className="w-8 h-8 rounded-xl bg-indigo-700 flex items-center justify-center flex-shrink-0">
-              <Sparkles className="w-4 h-4 text-white" />
-            </div>
-            <div className="chat-ai px-4 py-3">
-              <div className="flex gap-1.5 items-center">
-                <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-              </div>
-            </div>
+            <div ref={bottomRef} />
           </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
-      {/* Suggested prompts */}
-      {messages.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto pb-3 flex-shrink-0 scrollbar-hide">
-          {SUGGESTED_PROMPTS.map(p => (
-            <button key={p} onClick={() => handleSend(p)}
-              className="flex-shrink-0 text-[11px] bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-600 px-3 py-1.5 rounded-full transition-all font-medium">
-              {p}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Input */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-3 flex gap-3 items-end flex-shrink-0">
-        <button className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors flex-shrink-0">
-          <Paperclip className="w-4 h-4" />
-        </button>
-        <textarea
-          ref={inputRef}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask anything... Type /case [name] for case context, /document [name] for document context"
-          rows={1}
-          className="flex-1 text-sm outline-none resize-none text-slate-900 placeholder-slate-400 max-h-32 leading-relaxed"
-          style={{ height: "auto", minHeight: "24px" }}
-          onInput={e => {
-            const el = e.target as HTMLTextAreaElement
-            el.style.height = "auto"
-            el.style.height = Math.min(el.scrollHeight, 128) + "px"
-          }}
-        />
-        <div className="flex gap-2 flex-shrink-0">
-          <button className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition-colors">
-            <Mic className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => handleSend()}
-            disabled={!input.trim() || loading}
-            className="w-9 h-9 rounded-xl bg-indigo-700 flex items-center justify-center text-white hover:bg-indigo-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </div>
+      <div className="pt-3">
+        {contextLabel && (
+          <p className="mb-2 truncate text-xs text-muted-foreground">
+            Using facts from <span className="font-mono text-foreground">{contextLabel.case_number}</span>
+            {getNextHearing(contextLabel.id, db.hearings) ? ` · next date ${formatDate(getNextHearing(contextLabel.id, db.hearings)!.date)}` : ""}
+          </p>
+        )}
+        <form
+          onSubmit={(e) => { e.preventDefault(); send() }}
+          className="flex items-end gap-2 rounded-2xl border border-border bg-surface p-2 shadow-sm transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-[3px] focus-within:ring-primary/15"
+        >
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                send()
+              }
+            }}
+            rows={1}
+            placeholder="Ask about a provision, draft a paragraph, or prepare for a hearing"
+            aria-label="Message"
+            className="max-h-44 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-relaxed text-foreground outline-none placeholder:text-subtle-foreground"
+          />
+          <Button type="submit" size="icon" disabled={!input.trim() || loading} aria-label="Send">
+            <ArrowUp />
+          </Button>
+        </form>
+        <p className={cn("mt-2 text-center text-xs text-subtle-foreground")}>
+          Suggested language for your review. Not legal advice. Verify citations before filing.
+        </p>
       </div>
-      <p className="text-[10px] text-center text-slate-400 mt-2">
-        LexAI provides suggested language only — always verify before filing. Not legal advice.
-      </p>
     </div>
   )
 }

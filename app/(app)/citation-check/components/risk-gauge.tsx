@@ -1,4 +1,5 @@
 "use client"
+import { cn } from "@/lib/utils"
 
 interface RiskGaugeProps {
   score: number
@@ -6,49 +7,37 @@ interface RiskGaugeProps {
   animated?: boolean
 }
 
-export function RiskGauge({ score, verdict, animated = true }: RiskGaugeProps) {
-  const getColor = (s: number) => {
-    if (s <= 30) return { stroke: "#10B981", text: "text-emerald-600", bg: "bg-emerald-50" }
-    if (s <= 60) return { stroke: "#F59E0B", text: "text-amber-600", bg: "bg-amber-50" }
-    return { stroke: "#F43F5E", text: "text-rose-600", bg: "bg-rose-50" }
-  }
+function band(score: number) {
+  if (score <= 30) return { color: "var(--success)", text: "text-success-soft-foreground", label: "Low risk" }
+  if (score <= 60) return { color: "var(--warning)", text: "text-warning-soft-foreground", label: "Review needed" }
+  return { color: "var(--danger)", text: "text-danger-soft-foreground", label: "High risk" }
+}
 
-  const colors = getColor(score)
+export function RiskGauge({ score, verdict, animated = true }: RiskGaugeProps) {
+  const b = band(score)
   const radius = 70
   const circumference = Math.PI * radius
-  const offset = circumference - (score / 100) * circumference
+  const offset = circumference - (Math.min(100, Math.max(0, score)) / 100) * circumference
 
   return (
     <div className="flex flex-col items-center">
-      <svg width="180" height="100" viewBox="0 0 180 100" className="overflow-visible">
-        {/* Background arc */}
+      <svg width="180" height="104" viewBox="0 0 180 104" role="img" aria-label={`Risk score ${score} out of 100, ${b.label}`}>
+        <path d="M 20 95 A 70 70 0 0 1 160 95" fill="none" style={{ stroke: "var(--surface-3)" }} strokeWidth="12" strokeLinecap="round" />
         <path
-          d="M 10 90 A 70 70 0 0 1 170 90"
+          d="M 20 95 A 70 70 0 0 1 160 95"
           fill="none"
-          stroke="#E2E8F0"
+          style={{ stroke: b.color }}
           strokeWidth="12"
           strokeLinecap="round"
-        />
-        {/* Color zones */}
-        <path d="M 10 90 A 70 70 0 0 1 50 27" fill="none" stroke="#10B981" strokeWidth="3" strokeLinecap="round" opacity="0.2" />
-        <path d="M 50 27 A 70 70 0 0 1 130 27" fill="none" stroke="#F59E0B" strokeWidth="3" strokeLinecap="round" opacity="0.2" />
-        <path d="M 130 27 A 70 70 0 0 1 170 90" fill="none" stroke="#F43F5E" strokeWidth="3" strokeLinecap="round" opacity="0.2" />
-        {/* Active arc */}
-        <path
-          d="M 10 90 A 70 70 0 0 1 170 90"
-          fill="none"
-          stroke={colors.stroke}
-          strokeWidth="12"
-          strokeLinecap="round"
-          strokeDasharray={`${circumference}`}
+          strokeDasharray={circumference}
           strokeDashoffset={offset}
-          className={animated ? "transition-all duration-1000 ease-out" : ""}
+          className={animated ? "transition-[stroke-dashoffset] duration-1000 ease-out-soft" : ""}
         />
-        {/* Score text */}
-        <text x="90" y="75" textAnchor="middle" className="text-3xl font-bold" fill={colors.stroke}>{score}</text>
-        <text x="90" y="93" textAnchor="middle" className="text-[10px] font-medium" fill="#94A3B8">/ 100 risk</text>
+        <text x="90" y="80" textAnchor="middle" className="tabular text-[30px] font-semibold" style={{ fill: "var(--foreground)" }}>{score}</text>
+        <text x="90" y="98" textAnchor="middle" className="text-[11px]" style={{ fill: "var(--subtle-foreground)" }}>out of 100</text>
       </svg>
-      <p className={`text-sm font-semibold mt-2 text-center ${colors.text}`}>{verdict}</p>
+      <p className={cn("mt-2 text-sm font-semibold", b.text)}>{b.label}</p>
+      {verdict && <p className="mt-1 max-w-[32ch] text-center text-[13px] text-muted-foreground">{verdict}</p>}
     </div>
   )
 }

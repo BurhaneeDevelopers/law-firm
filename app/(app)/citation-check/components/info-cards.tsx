@@ -1,44 +1,42 @@
 "use client"
-import { Check, Search, BookOpen, Hash, User, CalendarDays, Scale } from "lucide-react"
+import { BookOpen, CalendarDays, Check, Hash, Landmark, Scale, UserRound } from "lucide-react"
+import { Card, CardHeader } from "@/components/ui/card"
+
+const checks = [
+  { icon: Scale, text: "Supreme Court judgments, 1950 onwards" },
+  { icon: Landmark, text: "All 25 High Courts" },
+  { icon: BookOpen, text: "Reported district court judgments" },
+  { icon: Hash, text: "SCC, AIR, CrLJ and neutral citation formats" },
+  { icon: Check, text: "Case number format" },
+  { icon: UserRound, text: "Judge and bench cross-reference" },
+  { icon: CalendarDays, text: "Year and court plausibility" },
+]
 
 export function WhatWeCheckCard() {
-  const checks = [
-    { icon: <Scale className="w-3.5 h-3.5 text-indigo-600" />, text: "Supreme Court of India judgments (1950–present)" },
-    { icon: <BookOpen className="w-3.5 h-3.5 text-indigo-600" />, text: "All High Court databases (25 High Courts)" },
-    { icon: <Search className="w-3.5 h-3.5 text-indigo-600" />, text: "District Court reported judgments" },
-    { icon: <Hash className="w-3.5 h-3.5 text-indigo-600" />, text: "SCC, AIR, CrLJ citation formats" },
-    { icon: <Check className="w-3.5 h-3.5 text-indigo-600" />, text: "Case number format validation" },
-    { icon: <User className="w-3.5 h-3.5 text-indigo-600" />, text: "Judge name + bench cross-reference" },
-    { icon: <CalendarDays className="w-3.5 h-3.5 text-indigo-600" />, text: "Year + court combination plausibility" },
-  ]
-
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-      <h3 className="text-sm font-semibold text-slate-900 mb-3">What We Check</h3>
-      <div className="space-y-2.5">
-        {checks.map((c, i) => (
-          <div key={i} className="flex items-start gap-2.5">
-            <div className="w-5 h-5 rounded-md bg-indigo-50 flex items-center justify-center flex-shrink-0 mt-0.5">{c.icon}</div>
-            <span className="text-xs text-slate-600 leading-relaxed">{c.text}</span>
-          </div>
+    <Card>
+      <CardHeader title="What is checked" />
+      <ul className="space-y-2.5 px-5 pb-5 pt-2">
+        {checks.map((c) => (
+          <li key={c.text} className="flex items-start gap-2.5 text-[13px] text-muted-foreground">
+            <c.icon className="mt-0.5 size-4 shrink-0 text-subtle-foreground" />
+            {c.text}
+          </li>
         ))}
-      </div>
-    </div>
+      </ul>
+    </Card>
   )
 }
 
 export function CourtWarningCard() {
   return (
-    <div className="bg-rose-50 rounded-xl border border-rose-200 p-5">
-      <h3 className="text-sm font-semibold text-rose-800 mb-2">Why This Matters</h3>
-      <p className="text-xs text-rose-700 leading-relaxed mb-3">
-        In 2026, Indian courts have begun issuing cost sanctions against lawyers who file AI-generated citations
-        that do not exist. A single hallucinated case reference can result in contempt proceedings. Verify every AI
-        draft before signing.
+    <div className="rounded-2xl border border-danger/25 bg-danger-soft p-5">
+      <h3 className="text-sm font-semibold text-danger-soft-foreground">Why this matters</h3>
+      <p className="mt-1.5 text-[13px] leading-relaxed text-danger-soft-foreground/90">
+        Indian courts have imposed costs on advocates who filed AI-generated citations that do not exist. One fabricated
+        reference can lead to contempt proceedings. Verify every AI draft before you sign it.
       </p>
-      <p className="text-[10px] text-rose-500 italic">
-        Based on reported cases from Delhi HC, Bombay HC, 2025–2026
-      </p>
+      <p className="mt-2 text-xs text-danger-soft-foreground/75">Based on reported orders of the Delhi and Bombay High Courts, 2025-2026.</p>
     </div>
   )
 }

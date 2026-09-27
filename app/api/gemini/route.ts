@@ -27,11 +27,11 @@ function getDemoAIResponse(prompt: string): string {
   const lower = prompt.toLowerCase()
 
   if (lower.includes("summarize") && lower.includes("case")) {
-    return `**Case Summary — For Your Review**\n\n**Case No.:** CRL/204/2024\n**Client:** Ramesh Kumar Sharma\n**Current Stage:** Arguments on bail conditions\n**Court:** Rohtak District Court, Court No. 5\n\n**Suggested Next Steps:**\n1. File cross-examination questions\n2. Challenge disputed documents\n3. File written arguments\n\n*This summary is for your review. Please verify all details with case records.*`
+    return `**Case summary (for your review)**\n\n**Case No.:** CRL/204/2024\n**Client:** Ramesh Kumar Sharma\n**Current Stage:** Arguments on bail conditions\n**Court:** Rohtak District Court, Court No. 5\n\n**Suggested Next Steps:**\n1. File cross-examination questions\n2. Challenge disputed documents\n3. File written arguments\n\n*This summary is for your review. Please verify all details with case records.*`
   }
 
   if (lower.includes("draft") || lower.includes("notice") || lower.includes("bail")) {
-    return `**Draft Legal Notice — For Your Review**\n\nThis is a suggested draft prepared from your input. Please review party names, dates, provisions, and factual statements before use in court filing.`
+    return `**Draft legal notice (for your review)**\n\nThis is a suggested draft prepared from your input. Please review party names, dates, provisions, and factual statements before use in court filing.`
   }
 
   if (lower.includes("hearing") || lower.includes("today")) {
@@ -39,7 +39,7 @@ function getDemoAIResponse(prompt: string): string {
   }
 
   if (lower.includes("client") && lower.includes("message")) {
-    return `**Client Update Message — English & Hindi**\n\nSuggested bilingual client communication is ready for your review. Please personalize dates and case details.`
+    return `**Client update message (English and Hindi)**\n\nSuggested bilingual client communication is ready for your review. Please personalize dates and case details.`
   }
 
   return `**LexAI Response**\n\nI can help with case summaries, notice drafts, hearing prep, and client communications. Share your case context and requested output format.`
