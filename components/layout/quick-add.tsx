@@ -1,16 +1,18 @@
 "use client"
 import { useRouter } from "next/navigation"
-import { Briefcase, CalendarPlus, Plus, ScrollText, Upload, UserPlus } from "lucide-react"
+import { Briefcase, CalendarClock, CalendarPlus, IndianRupee, Plus, ScrollText, Upload, UserPlus } from "lucide-react"
 import { useState } from "react"
 import { Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownSeparator, DropdownTrigger } from "@/components/ui/dropdown"
 import { Button } from "@/components/ui/button"
 import { AddHearingDialog } from "@/components/practice/add-hearing-dialog"
 import { UploadDialog } from "@/components/practice/upload-dialog"
 import { cn } from "@/lib/utils"
+import { useDues } from "@/components/dues/dues-context"
 
 /** One entry point for everything an advocate creates during the day. */
 export function QuickAddMenu({ variant = "button" }: { variant?: "button" | "fab" }) {
   const router = useRouter()
+  const dues = useDues()
   const [hearingOpen, setHearingOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
 
@@ -40,6 +42,9 @@ export function QuickAddMenu({ variant = "button" }: { variant?: "button" | "fab
           <DropdownItem onSelect={() => setHearingOpen(true)}><CalendarPlus /> Hearing date</DropdownItem>
           <DropdownItem onSelect={() => router.push("/cases/new")}><Briefcase /> Case</DropdownItem>
           <DropdownItem onSelect={() => router.push("/clients/new")}><UserPlus /> Client</DropdownItem>
+          <DropdownSeparator />
+          <DropdownItem onSelect={() => dues.recordPayment()}><IndianRupee /> Payment received</DropdownItem>
+          <DropdownItem onSelect={() => dues.addDue()}><CalendarClock /> Fee due</DropdownItem>
           <DropdownSeparator />
           <DropdownItem onSelect={() => router.push("/notices/new")}><ScrollText /> Legal notice</DropdownItem>
           <DropdownItem onSelect={() => setUploadOpen(true)}><Upload /> Upload document</DropdownItem>

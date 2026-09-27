@@ -24,6 +24,7 @@ export const demoLawyer = {
   firm_name: "Yadav & Associates",
   firm_address: "Chamber No. 42, Lawyers' Block, District Courts, Rohtak, Haryana 124001",
   firm_gstin: "",
+  upi_id: "mahipalyadav@okicici",
   specializations: ["Criminal Law", "Property Disputes", "Family Law"],
   courts: ["Rohtak District Court", "Punjab & Haryana High Court"],
   languages: ["Hindi", "English", "Haryanvi"],
@@ -120,21 +121,48 @@ export const demoNotes = [
 ]
 
 export const demoPayments = [
-  { id: "p1", case_id: "case-1", amount: 50000, mode: "UPI", reference: "UPI 412356789012", note: "First instalment", date: "2024-01-20" },
-  { id: "p2", case_id: "case-1", amount: 40000, mode: "Cash", reference: "", note: "At bail hearing", date: "2024-02-16" },
-  { id: "p3", case_id: "case-2", amount: 50000, mode: "Bank transfer", reference: "NEFT N0482231", note: "", date: "2024-02-05" },
-  { id: "p4", case_id: "case-3", amount: 200000, mode: "Cheque", reference: "Chq 118245", note: "Retainer", date: "2024-02-20" },
-  { id: "p5", case_id: "case-4", amount: 20000, mode: "Cash", reference: "", note: "", date: "2024-03-07" },
-  { id: "p6", case_id: "case-5", amount: 120000, mode: "Bank transfer", reference: "IMPS 99812", note: "Full fee", date: "2023-09-12" },
-  { id: "p7", case_id: "case-7", amount: 100000, mode: "UPI", reference: "UPI 998811223344", note: "", date: "2024-04-12" },
-  { id: "p8", case_id: "case-8", amount: 30000, mode: "UPI", reference: "UPI 761234980011", note: "", date: "2024-04-24" },
-  { id: "p9", case_id: "case-10", amount: 75000, mode: "Cash", reference: "", note: "", date: "2024-05-17" },
-  { id: "p10", case_id: "case-11", amount: 150000, mode: "Bank transfer", reference: "NEFT N0918273", note: "Paid by son", date: "2024-05-30" },
-  { id: "p11", case_id: "case-13", amount: 200000, mode: "Cheque", reference: "Chq 004411", note: "Full fee", date: "2023-03-02" },
-  { id: "p12", case_id: "case-14", amount: 100000, mode: "Bank transfer", reference: "", note: "Full fee", date: "2023-05-20" },
-  { id: "p13", case_id: "case-15", amount: 35000, mode: "UPI", reference: "", note: "", date: "2024-04-15" },
-  { id: "p14", case_id: "case-9", amount: 50000, mode: "Cash", reference: "", note: "Full fee", date: "2023-11-15" },
-  { id: "p15", case_id: "case-12", amount: 15000, mode: "UPI", reference: "", note: "Advance", date: format(subDays(base, 2), "yyyy-MM-dd") },
+  { id: "p1", case_id: "case-1", due_id: "", amount: 50000, mode: "UPI", reference: "UPI 412356789012", note: "First instalment", date: "2024-01-20" },
+  { id: "p2", case_id: "case-1", due_id: "", amount: 40000, mode: "Cash", reference: "", note: "At bail hearing", date: "2024-02-16" },
+  { id: "p3", case_id: "case-2", due_id: "", amount: 50000, mode: "Bank transfer", reference: "NEFT N0482231", note: "", date: "2024-02-05" },
+  { id: "p4", case_id: "case-3", due_id: "", amount: 200000, mode: "Cheque", reference: "Chq 118245", note: "Retainer", date: "2024-02-20" },
+  { id: "p5", case_id: "case-4", due_id: "", amount: 20000, mode: "Cash", reference: "", note: "", date: "2024-03-07" },
+  { id: "p6", case_id: "case-5", due_id: "due-15", amount: 120000, mode: "Bank transfer", reference: "IMPS 99812", note: "Full fee", date: "2023-09-12" },
+  { id: "p7", case_id: "case-7", due_id: "", amount: 100000, mode: "UPI", reference: "UPI 998811223344", note: "", date: "2024-04-12" },
+  { id: "p8", case_id: "case-8", due_id: "", amount: 30000, mode: "UPI", reference: "UPI 761234980011", note: "", date: "2024-04-24" },
+  { id: "p9", case_id: "case-10", due_id: "", amount: 75000, mode: "Cash", reference: "", note: "", date: "2024-05-17" },
+  { id: "p10", case_id: "case-11", due_id: "", amount: 150000, mode: "Bank transfer", reference: "NEFT N0918273", note: "Paid by son", date: "2024-05-30" },
+  { id: "p11", case_id: "case-13", due_id: "", amount: 200000, mode: "Cheque", reference: "Chq 004411", note: "Full fee", date: "2023-03-02" },
+  { id: "p12", case_id: "case-14", due_id: "", amount: 100000, mode: "Bank transfer", reference: "", note: "Full fee", date: "2023-05-20" },
+  { id: "p13", case_id: "case-15", due_id: "", amount: 35000, mode: "UPI", reference: "", note: "", date: "2024-04-15" },
+  { id: "p14", case_id: "case-9", due_id: "", amount: 50000, mode: "Cash", reference: "", note: "Full fee", date: "2023-11-15" },
+  { id: "p15", case_id: "case-12", due_id: "", amount: 15000, mode: "UPI", reference: "", note: "Advance", date: format(subDays(base, 2), "yyyy-MM-dd") },
+  { id: "p16", case_id: "case-3", due_id: "due-4", amount: 25000, mode: "UPI", reference: "UPI 551203984411", note: "Part payment", date: day(-3) },
+  { id: "p17", case_id: "case-2", due_id: "due-18", amount: 20000, mode: "Cash", reference: "", note: "", date: day(-10) },
+  { id: "p18", case_id: "case-7", due_id: "due-19", amount: 50000, mode: "Bank transfer", reference: "NEFT N1182734", note: "", date: day(-19) },
+]
+
+// Fee schedule. Status (overdue, part paid, paid) is worked out from linked payments.
+export const demoDues = [
+  { id: "due-1", case_id: "case-1", description: "Second instalment", amount: 30000, due_date: day(-23), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 2, last_reminded_at: daysAgo(5), created_at: daysAgo(90) },
+  { id: "due-2", case_id: "case-1", description: "Final instalment", amount: 30000, due_date: day(20), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 0, last_reminded_at: "", created_at: daysAgo(90) },
+  { id: "due-3", case_id: "case-2", description: "Balance before settlement", amount: 10000, due_date: day(0), notes: "Client said she will pay at the mediation centre.", waived: false, waive_reason: "", original_due_date: "", reminder_count: 1, last_reminded_at: daysAgo(2), created_at: daysAgo(40) },
+  { id: "due-4", case_id: "case-3", description: "Instalment 2 of 3", amount: 75000, due_date: day(-8), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 1, last_reminded_at: daysAgo(6), created_at: daysAgo(120) },
+  { id: "due-5", case_id: "case-3", description: "Instalment 3 of 3", amount: 75000, due_date: day(22), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 0, last_reminded_at: "", created_at: daysAgo(120) },
+  { id: "due-6", case_id: "case-4", description: "Appearance fee (3 hearings)", amount: 20000, due_date: day(-47), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 3, last_reminded_at: daysAgo(12), created_at: daysAgo(80) },
+  { id: "due-7", case_id: "case-7", description: "Evidence stage fee", amount: 50000, due_date: day(3), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 0, last_reminded_at: "", created_at: daysAgo(30) },
+  { id: "due-8", case_id: "case-7", description: "Final arguments fee", amount: 25000, due_date: day(35), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 0, last_reminded_at: "", created_at: daysAgo(30) },
+  { id: "due-9", case_id: "case-8", description: "Second instalment", amount: 30000, due_date: day(-2), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 1, last_reminded_at: daysAgo(1), created_at: daysAgo(60) },
+  { id: "due-10", case_id: "case-8", description: "Third instalment", amount: 30000, due_date: day(28), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 0, last_reminded_at: "", created_at: daysAgo(60) },
+  { id: "due-11", case_id: "case-10", description: "Sessions trial retainer", amount: 50000, due_date: day(-65), notes: "Family says crop money comes next month.", waived: false, waive_reason: "", original_due_date: "", reminder_count: 4, last_reminded_at: daysAgo(9), created_at: daysAgo(100) },
+  { id: "due-12", case_id: "case-11", description: "High Court bail hearing fee", amount: 100000, due_date: day(1), notes: "Son will transfer by NEFT.", waived: false, waive_reason: "", original_due_date: "", reminder_count: 0, last_reminded_at: "", created_at: daysAgo(20) },
+  { id: "due-13", case_id: "case-12", description: "Balance fee", amount: 15000, due_date: day(12), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 0, last_reminded_at: "", created_at: daysAgo(2) },
+  { id: "due-14", case_id: "case-15", description: "Complaint filing fee", amount: 35000, due_date: day(-110), notes: "", waived: false, waive_reason: "", original_due_date: day(-140), reminder_count: 5, last_reminded_at: daysAgo(20), created_at: daysAgo(170) },
+  { id: "due-15", case_id: "case-5", description: "Full fee", amount: 120000, due_date: "2023-09-12", notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 0, last_reminded_at: "", created_at: "2023-09-10T14:00:00Z" },
+  { id: "due-16", case_id: "case-16", description: "Clerkage", amount: 5000, due_date: day(-15), notes: "", waived: true, waive_reason: "Waived as a courtesy for an old client", original_due_date: "", reminder_count: 0, last_reminded_at: "", created_at: daysAgo(40) },
+  { id: "due-17", case_id: "case-6", description: "Bail application fee", amount: 40000, due_date: day(-5), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 0, last_reminded_at: "", created_at: daysAgo(25) },
+  { id: "due-18", case_id: "case-2", description: "First instalment", amount: 20000, due_date: day(-12), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 0, last_reminded_at: "", created_at: daysAgo(40) },
+  { id: "due-19", case_id: "case-7", description: "Replication drafting fee", amount: 50000, due_date: day(-21), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 1, last_reminded_at: daysAgo(22), created_at: daysAgo(45) },
+  { id: "due-20", case_id: "case-16", description: "Succession petition fee", amount: 35000, due_date: day(6), notes: "", waived: false, waive_reason: "", original_due_date: "", reminder_count: 0, last_reminded_at: "", created_at: daysAgo(10) },
 ]
 
 export const demoCommLogs = [
@@ -154,11 +182,6 @@ export const demoActivity = [
   { id: "a8", lawyer_id: "lawyer-1", action_type: "note_added", entity_type: "note", entity_id: "note-5", description: "Added case note to CRM-M/4120/2024", created_at: ago(72) },
   { id: "a9", lawyer_id: "lawyer-1", action_type: "case_created", entity_type: "case", entity_id: "case-12", description: "New case: consumer complaint for Anita Malik", created_at: ago(96) },
   { id: "a10", lawyer_id: "lawyer-1", action_type: "notice_sent", entity_type: "notice", entity_id: "n2", description: "Sent Section 138 notice to Kapoor Industries", created_at: ago(120) },
-]
-
-export const demoAIConversation = [
-  { role: "user", content: "Summarise my most urgent matters today", timestamp: ago(3) },
-  { role: "assistant", content: "**Urgent matters for today**\n\nYou have **3 hearings today** and **1 bail matter tomorrow**:\n\n1. **CRL/204/2024**, State vs. Ramesh Kumar Sharma\n- Court No. 5, item 14, 10:30 AM\n- Stage: arguments\n- Client confirmed present\n\n2. **SC/345/2024**, State vs. Kavita Sheoran\n- Sessions Court Hall 2, item 7, 11:00 AM\n- Stage: framing of charges\n- Keep discharge arguments ready\n\n3. **CWP/3120/2024**, Hooda vs. HSVP\n- P&H High Court, Court 12, item 38, 2:30 PM\n- Mention for early hearing\n\n4. **CRM-M/4120/2024**, NDPS bail (tomorrow)\n- Prepare submissions on Section 37 twin conditions\n\n*For your review. Verify timings with the cause list.*", timestamp: ago(3) },
 ]
 
 export const demoDeadlines = [

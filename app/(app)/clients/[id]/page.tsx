@@ -1,7 +1,7 @@
 "use client"
 import { use, useState } from "react"
 import Link from "next/link"
-import { Briefcase, Copy, FileText, MessageSquareText, Pencil, Phone, Plus, Save, Sparkles, Users } from "lucide-react"
+import { Briefcase, CalendarPlus, FileText, IndianRupee, MessageSquareText, Pencil, Phone, Plus, Receipt, Save, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, DetailRow } from "@/components/ui/card"
 import { Badge, CaseTypeTag, StatusBadge } from "@/components/ui/badge"
@@ -11,11 +11,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, SheetContent } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/toast"
 import { WhatsAppMenu } from "@/components/practice/whatsapp-menu"
-import { AIText } from "@/components/practice/ai-text"
 import { ID_PROOF_TYPES, LANGUAGES, OPEN_STATUSES } from "@/lib/constants"
 import { formatDate, formatINR, formatRelativeTime, getRelativeDayLabel, maskId } from "@/lib/utils"
-import { addCommLog, getCaseFees, getClientFees, getNextHearing, uid, updateClient, useDB, type Client } from "@/lib/store"
-import { callGemini } from "@/lib/gemini"
+import { addCommLog, getCaseFees, getClientDueInfos, getClientFees, getNextHearing, isOpenDue, summariseDues, uid, updateClient, useDB, type Client } from "@/lib/store"
+import { useDues } from "@/components/dues/dues-context"
+import { DueRow } from "@/components/dues/due-row"
+import { OverdueBanner } from "@/components/dues/overdue-banner"
 
 const CHANNELS = ["Call", "WhatsApp", "Meeting", "Email"] as const
 
@@ -24,10 +25,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const db = useDB()
   const { toast } = useToast()
   const [editOpen, setEditOpen] = useState(false)
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get("tab") ?? "dues")
+  const dues = useDues()
   const [log, setLog] = useState({ channel: "Call" as (typeof CHANNELS)[number], summary: "" })
   const [showId, setShowId] = useState(false)
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiBrief, setAiBrief] = useState("")
 
   const client = db.clients.find((c) => c.id === id)
   if (!client) {
@@ -46,6 +47,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const docs = db.documents.filter((d) => cases.some((c) => c.id === d.case_id))
   const logs = db.commLogs.filter((l) => l.client_id === id).sort((a, b) => b.created_at.localeCompare(a.created_at))
   const fees = getClientFees(id, db)
+  const dueInfos = getClientDueInfos(id, db)
+  const dueSummary = summariseDues(dueInfos)
+  const openDues = dueInfos.filter(isOpenDue).sort((a, b) => b.daysOverdue - a.daysOverdue || a.due.due_date.localeCompare(b.due.due_date))
+  const settledDues = dueInfos.filter((i) => !isOpenDue(i))
 
   const saveLog = (e: React.FormEvent) => {
     e.preventDefault()
@@ -53,21 +58,6 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     addCommLog({ id: uid("cl"), client_id: id, channel: log.channel, summary: log.summary.trim(), created_at: new Date().toISOString() })
     setLog((l) => ({ ...l, summary: "" }))
     toast("Logged", "success")
-  }
-
-  const handleAIBrief = async () => {
-    setAiLoading(true)
-    const prompt = `Prepare a short meeting brief for Advocate ${db.lawyer.name} about this client:
-Client: ${client.full_name}, ${client.city}. Preferred language: ${client.preferred_language}.
-Notes: ${client.notes || "none"}
-Cases: ${cases.map((c) => `${c.case_number} ${c.title} (${c.status})`).join("; ") || "none"}
-Fees: agreed ${fees.agreed}, received ${fees.received}, balance ${fees.balance}
-Recent communication: ${logs.slice(0, 3).map((l) => `${l.channel}: ${l.summary}`).join("; ") || "none"}
-
-Cover: who they are, matters and their stage, what to discuss, anything sensitive.`
-    const result = await callGemini(prompt)
-    setAiBrief(result)
-    setAiLoading(false)
   }
 
   return (
@@ -95,15 +85,55 @@ Cover: who they are, matters and their stage, what to discuss, anything sensitiv
         }
       />
 
+      {dueSummary.overdueCount > 0 && dueSummary.oldestOverdue && (
+        <OverdueBanner
+          amount={dueSummary.overdueBalance}
+          days={dueSummary.maxDaysOverdue}
+          label={dueSummary.overdueCount > 1 ? `${dueSummary.overdueCount} dues` : dueSummary.oldestOverdue.due.description}
+          onMarkPaid={dueSummary.overdueCount === 1 ? () => dues.markPaid(dueSummary.oldestOverdue!.due.id) : undefined}
+          onRecord={() => dues.recordPayment({ clientId: id })}
+          onView={() => setTab("dues")}
+        />
+      )}
+
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card className="min-w-0 overflow-hidden">
-          <Tabs defaultValue="cases">
+          <Tabs value={tab} onValueChange={setTab}>
             <TabsList>
+              <TabsTrigger value="dues" count={openDues.length || undefined}>Fees & dues</TabsTrigger>
               <TabsTrigger value="cases" count={cases.length}>Cases</TabsTrigger>
               <TabsTrigger value="log" count={logs.length}>Communication</TabsTrigger>
               <TabsTrigger value="documents" count={docs.length}>Documents</TabsTrigger>
-              <TabsTrigger value="ai"><Sparkles className="size-3.5" /> Meeting brief</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="dues" className="space-y-5 p-5">
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => dues.recordPayment({ clientId: id })}><IndianRupee /> Record payment</Button>
+                <Button size="sm" variant="outline" onClick={() => dues.addDue({ clientId: id })}><CalendarPlus /> Add due</Button>
+              </div>
+              {dueInfos.length === 0 ? (
+                <EmptyState icon={Receipt} title="No dues scheduled" description="Add when this client should pay. You get an alert and an email on the day." />
+              ) : (
+                <>
+                  {openDues.length > 0 && (
+                    <section>
+                      <h3 className="mb-2 text-xs font-medium text-subtle-foreground">Pending · {openDues.length}</h3>
+                      <div className="divide-y divide-border rounded-xl border border-border">
+                        {openDues.map((i) => <DueRow key={i.due.id} info={i} showCase />)}
+                      </div>
+                    </section>
+                  )}
+                  {settledDues.length > 0 && (
+                    <section>
+                      <h3 className="mb-2 text-xs font-medium text-subtle-foreground">Paid and waived · {settledDues.length}</h3>
+                      <div className="divide-y divide-border rounded-xl border border-border">
+                        {settledDues.map((i) => <DueRow key={i.due.id} info={i} showCase />)}
+                      </div>
+                    </section>
+                  )}
+                </>
+              )}
+            </TabsContent>
 
             <TabsContent value="cases" className="p-5">
               <div className="mb-4 flex justify-end">
@@ -187,24 +217,6 @@ Cover: who they are, matters and their stage, what to discuss, anything sensitiv
               )}
             </TabsContent>
 
-            <TabsContent value="ai" className="p-5">
-              {!aiBrief ? (
-                <EmptyState
-                  icon={Sparkles}
-                  title="Prepare for a meeting"
-                  description="A short brief with matters, stage, fees and points to discuss."
-                  action={<Button onClick={handleAIBrief} loading={aiLoading}>{!aiLoading && <Sparkles />} {aiLoading ? "Preparing" : "Generate brief"}</Button>}
-                />
-              ) : (
-                <div className="space-y-4">
-                  <AIText content={aiBrief} />
-                  <div className="flex gap-2 border-t border-border pt-4">
-                    <Button size="sm" variant="outline" onClick={handleAIBrief} loading={aiLoading}>Regenerate</Button>
-                    <Button size="sm" variant="ghost" onClick={() => { navigator.clipboard.writeText(aiBrief); toast("Copied", "success") }}><Copy /> Copy</Button>
-                  </div>
-                </div>
-              )}
-            </TabsContent>
           </Tabs>
         </Card>
 
@@ -214,8 +226,17 @@ Cover: who they are, matters and their stage, what to discuss, anything sensitiv
             <dl className="px-5 pb-4 pt-1">
               <DetailRow label="Open cases">{openCases.length} of {cases.length}</DetailRow>
               <DetailRow label="Fees agreed">{formatINR(fees.agreed)}</DetailRow>
-              <DetailRow label="Received">{formatINR(fees.received)}</DetailRow>
-              <DetailRow label="Balance">
+              <DetailRow label="Received"><span className="text-success-soft-foreground">{formatINR(fees.received)}</span></DetailRow>
+              <DetailRow label="Overdue">
+                <span className={dueSummary.overdueBalance ? "text-danger-soft-foreground" : "text-foreground"}>
+                  {formatINR(dueSummary.overdueBalance)}
+                  {dueSummary.maxDaysOverdue > 0 && <span className="font-normal"> · {dueSummary.maxDaysOverdue}d</span>}
+                </span>
+              </DetailRow>
+              <DetailRow label="Next due">
+                {dueSummary.next ? `${formatINR(dueSummary.next.balance)} · ${formatDate(dueSummary.next.due.due_date, "dd MMM")}` : "None"}
+              </DetailRow>
+              <DetailRow label="Total balance">
                 <span className={fees.balance ? "text-warning-soft-foreground" : "text-success-soft-foreground"}>{formatINR(fees.balance)}</span>
               </DetailRow>
             </dl>

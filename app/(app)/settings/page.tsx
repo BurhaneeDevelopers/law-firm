@@ -5,10 +5,11 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Field, Input, Select, Textarea } from "@/components/ui/field"
-import { Avatar, Chip, PageHeader, Switch } from "@/components/ui/misc"
+import { Avatar, Chip, PageHeader } from "@/components/ui/misc"
 import { useToast } from "@/components/ui/toast"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import { SPECIALIZATIONS } from "@/lib/constants"
+import { AlertSettings } from "@/components/dues/alert-settings"
 import { cn, isValidEmail } from "@/lib/utils"
 import { updateLawyer, useDB } from "@/lib/store"
 import { useTheme, type ThemePreference } from "@/lib/theme"
@@ -16,42 +17,11 @@ import { useTheme, type ThemePreference } from "@/lib/theme"
 const SECTIONS = [
   { id: "profile", label: "Profile", icon: UserRound },
   { id: "firm", label: "Firm & letterhead", icon: Building2 },
-  { id: "notifications", label: "Reminders", icon: Bell },
+  { id: "notifications", label: "Alerts and email", icon: Bell },
   { id: "team", label: "Team", icon: Users },
   { id: "appearance", label: "Appearance", icon: Palette },
 ] as const
 type Section = (typeof SECTIONS)[number]["id"]
-
-const NOTIFY_KEY = "lexfirm-notification-prefs"
-const defaultNotify = {
-  client_day_before: true,
-  client_morning: false,
-  me_daily_board: true,
-  me_deadline_3_days: true,
-  me_weekly_summary: false,
-  me_fee_followup: true,
-}
-
-const notifyGroups = [
-  {
-    title: "Client reminders",
-    description: "Prepared for you to send on WhatsApp in the client's language.",
-    items: [
-      { key: "client_day_before", label: "Evening before the hearing" },
-      { key: "client_morning", label: "Morning of the hearing" },
-    ],
-  },
-  {
-    title: "For you",
-    description: "Shown on the Today screen and activity list.",
-    items: [
-      { key: "me_daily_board", label: "Tomorrow's board at 7 PM" },
-      { key: "me_deadline_3_days", label: "Deadlines 3 days before they fall due" },
-      { key: "me_fee_followup", label: "Fee balance older than 30 days" },
-      { key: "me_weekly_summary", label: "Weekly summary on Saturday" },
-    ],
-  },
-] as const
 
 const initialTeam = [
   { id: 1, name: "Rahul Yadav", email: "rahul.yadav@lexfirm.in", role: "Associate", status: "Active" },
@@ -74,16 +44,12 @@ export default function SettingsPage() {
   const { toast } = useToast()
   const { confirm, dialogElement } = useConfirmDialog()
   const { preference, setPreference } = useTheme()
-  const [section, setSection] = useState<Section>("profile")
+  const [section, setSection] = useState<Section>(() => {
+    const q = new URLSearchParams(window.location.search).get("section")
+    return SECTIONS.some((x) => x.id === q) ? (q as Section) : "profile"
+  })
   const [profile, setProfile] = useState(db.lawyer)
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [notify, setNotify] = useState<typeof defaultNotify>(() => {
-    try {
-      return { ...defaultNotify, ...JSON.parse(localStorage.getItem(NOTIFY_KEY) ?? "{}") }
-    } catch {
-      return defaultNotify
-    }
-  })
   const [team, setTeam] = useState(initialTeam)
   const [invite, setInvite] = useState({ email: "", role: "Associate" })
   const [inviteError, setInviteError] = useState("")
@@ -104,12 +70,6 @@ export default function SettingsPage() {
     if (Object.keys(e).length) return
     updateLawyer(profile)
     toast("Settings saved", "success")
-  }
-
-  const toggleNotify = (k: keyof typeof defaultNotify, v: boolean) => {
-    const next = { ...notify, [k]: v }
-    setNotify(next)
-    try { localStorage.setItem(NOTIFY_KEY, JSON.stringify(next)) } catch { /* ignore */ }
   }
 
   const sendInvite = (e: React.FormEvent) => {
@@ -197,6 +157,9 @@ export default function SettingsPage() {
               <div className="space-y-4">
                 <Field label="Firm / chamber name" required error={errors.firm_name}><Input value={profile.firm_name} onChange={(e) => setP("firm_name", e.target.value)} /></Field>
                 <Field label="Chamber address"><Textarea rows={3} value={profile.firm_address} onChange={(e) => setP("firm_address", e.target.value)} /></Field>
+                <Field label="UPI ID for fees" hint="Added to payment reminders so clients can pay straight away.">
+                  <Input value={profile.upi_id} onChange={(e) => setP("upi_id", e.target.value.trim())} className="font-mono" placeholder="yourname@okicici" />
+                </Field>
                 <Field label="GSTIN" hint="Optional. Printed on fee receipts when added."><Input value={profile.firm_gstin} onChange={(e) => setP("firm_gstin", e.target.value.toUpperCase())} className="font-mono" placeholder="06ABCDE1234F1Z5" /></Field>
               </div>
               <div>
@@ -213,25 +176,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {section === "notifications" && (
-            <div className="divide-y divide-border animate-fade-in">
-              {notifyGroups.map((g) => (
-                <section key={g.title} className="p-5 sm:p-6">
-                  <h2 className="text-sm font-semibold text-foreground">{g.title}</h2>
-                  <p className="mt-0.5 text-[13px] text-muted-foreground">{g.description}</p>
-                  <div className="mt-3 space-y-1">
-                    {g.items.map((item) => (
-                      <label key={item.key} className="flex cursor-pointer items-center justify-between gap-4 rounded-lg px-1 py-2.5">
-                        <span className="text-sm text-foreground">{item.label}</span>
-                        <Switch checked={notify[item.key]} onCheckedChange={(v) => toggleNotify(item.key, v)} aria-label={item.label} />
-                      </label>
-                    ))}
-                  </div>
-                </section>
-              ))}
-              <p className="px-5 py-4 text-xs text-subtle-foreground sm:px-6">Saved on this device automatically.</p>
-            </div>
-          )}
+          {section === "notifications" && <AlertSettings fallbackEmail={db.lawyer.email} />}
 
           {section === "team" && (
             <div className="space-y-6 p-5 sm:p-6 animate-fade-in">

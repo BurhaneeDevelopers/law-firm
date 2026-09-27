@@ -2,8 +2,7 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import {
-  CalendarClock, Copy, Download, ExternalLink, FileImage, FileText, FileType2, FolderOpen, LayoutGrid, List,
-  ListChecks, ShieldAlert, Sparkles, Trash2, Upload,
+  Download, ExternalLink, FileImage, FileText, FileType2, FolderOpen, LayoutGrid, List, Trash2, Upload,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, DetailRow } from "@/components/ui/card"
@@ -14,23 +13,15 @@ import { Dialog, SheetContent } from "@/components/ui/dialog"
 import { useToast } from "@/components/ui/toast"
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import { UploadDialog } from "@/components/practice/upload-dialog"
-import { AIText } from "@/components/practice/ai-text"
 import { DOC_CATEGORIES } from "@/lib/constants"
-import { cn, formatDate } from "@/lib/utils"
+import { formatDate } from "@/lib/utils"
 import { deleteDocument, useDB, type Document } from "@/lib/store"
-import { callGemini } from "@/lib/gemini"
 
 const fileIcon: Record<string, React.ComponentType<{ className?: string }>> = {
   PDF: FileText,
   Word: FileType2,
   Image: FileImage,
 }
-
-const AI_ACTIONS = [
-  { id: "summarize", label: "Summarise", icon: ListChecks },
-  { id: "dates", label: "Key dates", icon: CalendarClock },
-  { id: "risks", label: "Risk points", icon: ShieldAlert },
-] as const
 
 export default function DocumentsPage() {
   const db = useDB()
@@ -42,7 +33,6 @@ export default function DocumentsPage() {
   const [view, setView] = useState<"grid" | "list">("list")
   const [uploadOpen, setUploadOpen] = useState(false)
   const [openId, setOpenId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("doc"))
-  const [ai, setAi] = useState<{ action: string; result: string; loading: boolean } | null>(null)
 
   const caseById = useMemo(() => new Map(db.cases.map((c) => [c.id, c])), [db.cases])
 
@@ -59,18 +49,6 @@ export default function DocumentsPage() {
 
   const openDoc = openId ? db.documents.find((d) => d.id === openId) : undefined
   const openCase = openDoc ? caseById.get(openDoc.case_id) : undefined
-
-  const runAI = async (doc: Document, action: string) => {
-    setAi({ action, result: "", loading: true })
-    const c = caseById.get(doc.case_id)
-    const prompts: Record<string, string> = {
-      summarize: `Summarise this legal document in plain English for the advocate's review.\nFile: ${doc.filename}\nType: ${doc.doc_category}\nCase: ${c?.title} (${c?.case_number})`,
-      dates: `List the key dates likely in this document and what each refers to (filing, orders, limitation).\nFile: ${doc.filename}\nType: ${doc.doc_category}\nCase: ${c?.title}`,
-      risks: `Flag legal risk points to check in this document (admissions, gaps, limitation, jurisdiction).\nFile: ${doc.filename}\nType: ${doc.doc_category}\nCase: ${c?.title}`,
-    }
-    const result = await callGemini(prompts[action])
-    setAi({ action, result, loading: false })
-  }
 
   const categoryCounts = useMemo(() => {
     const m = new Map<string, number>()
@@ -137,7 +115,7 @@ export default function DocumentsPage() {
                 <li key={d.id}>
                   <button
                     type="button"
-                    onClick={() => { setOpenId(d.id); setAi(null) }}
+                    onClick={() => setOpenId(d.id)}
                     className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-surface-2/60"
                   >
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted-foreground">{docIcon(d)}</span>
@@ -162,7 +140,7 @@ export default function DocumentsPage() {
               <button
                 key={d.id}
                 type="button"
-                onClick={() => { setOpenId(d.id); setAi(null) }}
+                onClick={() => setOpenId(d.id)}
                 className="flex flex-col rounded-2xl border border-border bg-surface p-4 text-left shadow-xs transition-[border-color,box-shadow] hover:border-border-strong hover:shadow-md"
               >
                 <span className="flex items-center justify-between">
@@ -177,7 +155,7 @@ export default function DocumentsPage() {
         </div>
       )}
 
-      <Dialog open={!!openDoc} onOpenChange={(o) => { if (!o) { setOpenId(null); setAi(null) } }}>
+      <Dialog open={!!openDoc} onOpenChange={(o) => { if (!o) setOpenId(null) }}>
         {openDoc && (
           <SheetContent title={openDoc.filename} description={`${openDoc.doc_category} · ${openDoc.size}`} className="max-w-lg">
             <div className="space-y-5">
@@ -217,31 +195,6 @@ export default function DocumentsPage() {
                 <DetailRow label="Date">{formatDate(openDoc.created_at, "dd MMM yyyy, h:mm a")}</DetailRow>
               </dl>
 
-              <section>
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground"><Sparkles className="size-4 text-primary" /> AI analysis</h3>
-                <div className="mt-2.5 grid grid-cols-3 gap-2">
-                  {AI_ACTIONS.map((a) => (
-                    <Button
-                      key={a.id}
-                      size="sm"
-                      variant={ai?.action === a.id ? "soft" : "outline"}
-                      loading={ai?.loading && ai.action === a.id}
-                      disabled={ai?.loading}
-                      onClick={() => runAI(openDoc, a.id)}
-                    >
-                      {!(ai?.loading && ai.action === a.id) && <a.icon />} {a.label}
-                    </Button>
-                  ))}
-                </div>
-                {ai && !ai.loading && ai.result && (
-                  <div className={cn("mt-3 rounded-xl border border-border p-4 animate-rise")}>
-                    <AIText content={ai.result} className="text-[13px]" />
-                    <Button size="xs" variant="ghost" className="mt-3" onClick={() => { navigator.clipboard.writeText(ai.result); toast("Copied", "success") }}>
-                      <Copy /> Copy
-                    </Button>
-                  </div>
-                )}
-              </section>
             </div>
           </SheetContent>
         )}

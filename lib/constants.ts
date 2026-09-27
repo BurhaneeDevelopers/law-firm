@@ -138,5 +138,3 @@ export const SPECIALIZATIONS = [
   "Corporate Law",
 ]
 
-// Session key used to hand an AI answer over to the notice drafter.
-export const AI_DRAFT_KEY = "lexfirm-ai-draft"

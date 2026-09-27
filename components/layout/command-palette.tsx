@@ -8,7 +8,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useDB } from "@/lib/store"
 import { Kbd } from "@/components/ui/misc"
-import { navGroups, settingsItem } from "./nav-config"
+import { navGroups, notificationsItem, settingsItem } from "./nav-config"
 
 interface CommandPaletteProps {
   open: boolean
@@ -40,7 +40,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         { id: "a-case", group: "Create", icon: <Plus className={iconCls} />, label: "New case", href: "/cases/new" },
         { id: "a-client", group: "Create", icon: <Plus className={iconCls} />, label: "New client", href: "/clients/new" },
         { id: "a-notice", group: "Create", icon: <Plus className={iconCls} />, label: "Draft legal notice", href: "/notices/new" },
-        ...[...navGroups.flatMap((g) => g.items), settingsItem].map((n) => ({
+        { id: "a-due", group: "Create", icon: <Plus className={iconCls} />, label: "Add fee due", href: "/dues?new=due" },
+        { id: "a-payment", group: "Create", icon: <Plus className={iconCls} />, label: "Record payment received", href: "/dues?new=payment" },
+        ...[...navGroups.flatMap((g) => g.items), notificationsItem, settingsItem].map((n) => ({
           id: `nav-${n.href}`,
           group: "Go to",
           icon: <n.icon className={iconCls} />,

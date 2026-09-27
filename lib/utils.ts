@@ -200,3 +200,32 @@ export function splitBold(line: string) {
     text: part.replace(/^\*\*|\*\*$/g, ""),
   }))
 }
+
+export function paymentReminderMessage(
+  params: {
+    clientName: string
+    amount: number
+    description: string
+    caseNumber: string
+    dueDate: string
+    daysOverdue: number
+    upiId?: string
+    lawyerName: string
+  },
+  language: Language = "English"
+) {
+  const amount = formatINR(params.amount)
+  const date = formatDate(params.dueDate, "dd MMM yyyy")
+  if (language === "Hindi") {
+    const when = params.daysOverdue > 0 ? `${date} को देय थी (${params.daysOverdue} दिन बीत चुके हैं)` : `${date} तक देय है`
+    return `नमस्ते ${params.clientName} जी,\n\nकेस ${params.caseNumber} में "${params.description}" की फ़ीस ${amount} ${when}।${params.upiId ? `\n\nUPI से भुगतान करें: ${params.upiId}` : ""}\n\nभुगतान हो जाने पर कृपया सूचित करें।\n\nधन्यवाद,\nएडवोकेट ${params.lawyerName}`
+  }
+  const when = params.daysOverdue > 0 ? `was due on ${date} (${params.daysOverdue} days ago)` : `is due on ${date}`
+  return `Dear ${params.clientName},\n\nA professional fee of ${amount} for "${params.description}" in case ${params.caseNumber} ${when}.${params.upiId ? `\n\nYou can pay by UPI to ${params.upiId}.` : ""}\n\nPlease let us know once paid. Kindly ignore if already paid.\n\nRegards,\nAdvocate ${params.lawyerName}`
+}
+
+/** Indian financial year (April to March) containing the date. */
+export function financialYear(date = new Date()) {
+  const y = date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1
+  return { from: `${y}-04-01`, to: `${y + 1}-03-31`, label: `FY ${y}-${String(y + 1).slice(2)}` }
+}

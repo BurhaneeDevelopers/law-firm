@@ -6,7 +6,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { Menu, PanelLeftClose, PanelLeftOpen, Scale, X } from "lucide-react"
 import { cn, todayISO } from "@/lib/utils"
 import { DEVELOPER_CREDIT, OPEN_STATUSES } from "@/lib/constants"
-import { useDB, type DB } from "@/lib/store"
+import { getOverdueSummary, useDB, type DB } from "@/lib/store"
 import { useHydrated } from "@/lib/use-hydrated"
 import { useStoredValue } from "@/lib/use-stored-value"
 import { SIDEBAR_STORAGE_KEY } from "@/lib/theme"
@@ -22,6 +22,7 @@ function useCounts(db: DB) {
     hearingsToday: db.hearings.filter((h) => h.date === today).length,
     urgentOpen: db.cases.filter((c) => c.priority === "Urgent" && OPEN_STATUSES.includes(c.status)).length,
     draftNotices: db.notices.filter((n) => n.status === "Draft").length,
+    overdueDues: getOverdueSummary(db).overdueCount,
   } as Record<string, number>
 }
 
@@ -40,7 +41,12 @@ function NavLink({ item, active, collapsed, count, onNavigate }: { item: NavItem
       <item.icon className={cn("size-[18px] shrink-0", active ? "text-primary" : "text-subtle-foreground group-hover:text-foreground")} strokeWidth={1.9} />
       {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
       {!collapsed && count ? (
-        <span className={cn("tabular rounded-md px-1.5 text-[11px] font-semibold leading-5", active ? "bg-primary/15" : "bg-surface-3 text-muted-foreground")}>
+        <span
+          className={cn(
+            "tabular rounded-md px-1.5 text-[11px] font-semibold leading-5",
+            item.countKey === "overdueDues" ? "bg-danger-soft text-danger-soft-foreground" : active ? "bg-primary/15" : "bg-surface-3 text-muted-foreground"
+          )}
+        >
           {count}
         </span>
       ) : null}
@@ -196,7 +202,10 @@ export function Sidebar() {
             onClick={() => setMoreOpen(true)}
             className="flex flex-col items-center gap-0.5 py-1 text-[11px] font-medium text-muted-foreground"
           >
-            <Menu className="size-[22px]" strokeWidth={1.8} />
+            <span className="relative">
+              <Menu className="size-[22px]" strokeWidth={1.8} />
+              {counts.overdueDues ? <span className="absolute -right-1 -top-0.5 size-2 rounded-full bg-danger ring-2 ring-surface" aria-label="Overdue fees" /> : null}
+            </span>
             More
           </button>
         </div>

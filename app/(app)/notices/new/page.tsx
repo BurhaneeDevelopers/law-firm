@@ -2,7 +2,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import {
-  ArrowLeft, ArrowRight, Ban, Check, FileSignature, FilePen, Gavel, HeartHandshake, Home, IndianRupee, Printer, Reply, Sparkles,
+  ArrowLeft, ArrowRight, Ban, Check, FileSignature, FilePen, Gavel, HeartHandshake, Home, IndianRupee, Printer, Reply,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -12,9 +12,7 @@ import { useToast } from "@/components/ui/toast"
 import { NoticePaper } from "@/components/practice/notice-paper"
 import { noticeTemplates, type NoticeTemplateIcon } from "@/lib/demo-data"
 import { cn, formatINR, todayISO } from "@/lib/utils"
-import { AI_DRAFT_KEY } from "@/lib/constants"
 import { addNotice, uid, useDB } from "@/lib/store"
-import { callGemini } from "@/lib/gemini"
 
 const templateIcons: Record<NoticeTemplateIcon, React.ComponentType<{ className?: string }>> = {
   demand: IndianRupee,
@@ -30,16 +28,7 @@ const templateIcons: Record<NoticeTemplateIcon, React.ComponentType<{ className?
 const STEPS = ["Template", "Details", "Review"]
 
 function readPrefill() {
-  const params = new URLSearchParams(window.location.search)
-  let aiText = ""
-  if (params.get("from") === "ai") {
-    try {
-      aiText = sessionStorage.getItem(AI_DRAFT_KEY) ?? ""
-    } catch {
-      aiText = ""
-    }
-  }
-  return { caseId: params.get("case") ?? "", aiText }
+  return { caseId: new URLSearchParams(window.location.search).get("case") ?? "" }
 }
 
 function basicNotice(type: string, form: { facts: string; amount: string; due_days: string }) {
@@ -66,7 +55,6 @@ export default function NewNoticePage() {
 
   const [step, setStep] = useState(0)
   const [templateId, setTemplateId] = useState<string | null>(null)
-  const [aiLoading, setAiLoading] = useState(false)
   const [content, setContent] = useState("")
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [form, setForm] = useState({
@@ -81,12 +69,11 @@ export default function NewNoticePage() {
     section: "",
     property_address: "",
     grounds: "",
-    facts: prefill.aiText,
+    facts: "",
   })
 
   const template = noticeTemplates.find((t) => t.id === templateId)
   const selectedCase = db.cases.find((c) => c.id === form.case_id)
-  const client = selectedCase ? db.clients.find((c) => c.id === selectedCase.client_id) : undefined
 
   const set = (k: keyof typeof form, v: string) => {
     setForm((f) => {
@@ -108,29 +95,6 @@ export default function NewNoticePage() {
     return Object.keys(e).length === 0
   }
 
-  const generateAI = async () => {
-    if (!template || !validateDetails()) return
-    setAiLoading(true)
-    const prompt = `Draft the body of a formal ${template.title} in Indian legal format with numbered paragraphs.
-Advocate: ${db.lawyer.name}, ${db.lawyer.firm_name}
-Client: ${client?.full_name ?? "[client]"}
-Recipient: ${form.recipient_name}, ${form.recipient_address}
-Case reference: ${selectedCase ? `${selectedCase.case_number}, ${selectedCase.title}` : "none"}
-${form.amount ? `Amount: ₹${form.amount}` : ""}
-${form.cheque ? `Cheque details: ${form.cheque}` : ""}
-${form.fir_number ? `FIR: ${form.fir_number}, sections ${form.section}` : ""}
-${form.property_address ? `Property: ${form.property_address}` : ""}
-${form.grounds ? `Grounds: ${form.grounds}` : ""}
-Compliance period: ${form.due_days} days
-Facts: ${form.facts}
-
-Return only the numbered body. Do not repeat the letterhead, date, recipient or signature.`
-    const result = await callGemini(prompt)
-    setContent(result)
-    setAiLoading(false)
-    setStep(2)
-  }
-
   const applyStandardFormat = () => {
     if (!template || !validateDetails()) return
     setContent(basicNotice(template.title, form))
@@ -150,7 +114,6 @@ Return only the numbered body. Do not repeat the letterhead, date, recipient or 
       status,
       created_at: new Date(`${form.date}T10:00:00`).toISOString(),
     })
-    try { sessionStorage.removeItem(AI_DRAFT_KEY) } catch { /* ignore */ }
     toast(status === "Sent" ? "Notice saved and marked as sent" : "Notice saved as draft", "success")
     router.push(`/notices/${n.id}`)
   }
@@ -262,15 +225,14 @@ Return only the numbered body. Do not repeat the letterhead, date, recipient or 
                 <Textarea rows={3} value={form.grounds} onChange={(e) => set("grounds", e.target.value)} />
               </Field>
             )}
-            <Field label="Facts and instructions" hint="Plain language is fine. AI turns it into numbered paragraphs." className="sm:col-span-2">
+            <Field label="Facts and instructions" hint="Added to the notice as paragraph 2. Edit the full text on the next step." className="sm:col-span-2">
               <Textarea rows={5} value={form.facts} onChange={(e) => set("facts", e.target.value)} placeholder="Who, what, when, how much, what the client wants" />
             </Field>
           </div>
           <div className="mt-6 flex flex-col-reverse gap-2 border-t border-border pt-5 sm:flex-row sm:items-center">
             <Button variant="ghost" onClick={() => setStep(0)}><ArrowLeft /> Templates</Button>
             <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:justify-end">
-              <Button variant="outline" onClick={applyStandardFormat}>Use standard format <ArrowRight /></Button>
-              <Button onClick={generateAI} loading={aiLoading}>{!aiLoading && <Sparkles />} {aiLoading ? "Drafting" : "Draft with AI"}</Button>
+              <Button onClick={applyStandardFormat}>Prepare draft <ArrowRight /></Button>
             </div>
           </div>
         </Card>
@@ -280,7 +242,6 @@ Return only the numbered body. Do not repeat the letterhead, date, recipient or 
         <div className="space-y-4 animate-fade-in">
           <div className="no-print flex flex-wrap items-center gap-2">
             <Button variant="ghost" onClick={() => setStep(1)}><ArrowLeft /> Edit details</Button>
-            <Button variant="outline" onClick={generateAI} loading={aiLoading}>{!aiLoading && <Sparkles />} Redraft</Button>
             <p className="ml-auto text-xs text-subtle-foreground">Click the text on the page to edit it.</p>
           </div>
 
@@ -302,7 +263,7 @@ Return only the numbered body. Do not repeat the letterhead, date, recipient or 
             <div className="hidden whitespace-pre-line print:block">{content}</div>
           </NoticePaper>
 
-          <p className="no-print text-xs text-subtle-foreground">Suggested language for your review. Verify facts, dates and provisions before signing.</p>
+          <p className="no-print text-xs text-subtle-foreground">Verify facts, dates and provisions before signing.</p>
 
           <div className="no-print flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:justify-end">
             <Button variant="outline" onClick={() => window.print()}><Printer /> Print / PDF</Button>

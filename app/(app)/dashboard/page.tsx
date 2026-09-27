@@ -2,8 +2,8 @@
 import { useState } from "react"
 import Link from "next/link"
 import {
-  AlarmClock, ArrowRight, Bot, Briefcase, CalendarDays, CalendarPlus, CircleAlert, Flag, Gavel, IndianRupee,
-  Scale, ShieldAlert, Sparkles, X,
+  AlarmClock, ArrowRight, Briefcase, CalendarDays, CalendarPlus, CircleAlert, Flag, Gavel, IndianRupee,
+  Scale, ShieldAlert, X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader } from "@/components/ui/card"
@@ -14,9 +14,11 @@ import { RecordOutcomeSheet } from "@/components/practice/record-outcome-sheet"
 import { AddHearingDialog } from "@/components/practice/add-hearing-dialog"
 import { caseStatusTone, toneSolid } from "@/lib/constants"
 import {
-  cn, formatDate, formatINRCompact, formatRelativeTime, formatTime, getDaysUntil, timeToMinutes, toISODate,
+  cn, formatDate, formatINR, formatINRCompact, formatRelativeTime, formatTime, getDaysUntil, timeToMinutes, toISODate,
 } from "@/lib/utils"
-import { getDashboardStats, sortHearings, useDB, type Hearing } from "@/lib/store"
+import { getDashboardStats, getDueInfos, sortHearings, useDB, type Hearing } from "@/lib/store"
+import { useDues } from "@/components/dues/dues-context"
+import { DueActions } from "@/components/dues/due-row"
 import { getCitationDashboardStats } from "@/lib/citation-store"
 import { addDays } from "date-fns"
 
@@ -34,6 +36,7 @@ export default function DashboardPage() {
   const stats = getDashboardStats(db)
   const citation = getCitationDashboardStats()
 
+  const dues = useDues()
   const [board, setBoard] = useState<"today" | "tomorrow">("today")
   const [outcomeFor, setOutcomeFor] = useState<Hearing | null>(null)
   const [addOpen, setAddOpen] = useState(false)
@@ -65,6 +68,10 @@ export default function DashboardPage() {
     }),
     "desc"
   )
+
+  const collect = getDueInfos(db)
+    .filter((i) => i.status === "Overdue" || i.status === "Due today")
+    .sort((a, b) => (a.status === "Due today" ? -1 : 0) - (b.status === "Due today" ? -1 : 0) || b.daysOverdue - a.daysOverdue)
 
   const deadlines = [...db.deadlines].sort((a, b) => getDaysUntil(a.due_date) - getDaysUntil(b.due_date))
 
@@ -150,12 +157,16 @@ export default function DashboardPage() {
         <Stat label="Next 7 days" value={stats.hearingsThisWeek} icon={CalendarDays} href="/calendar" hint={`${tomorrowCount} tomorrow`} />
         <Stat label="Urgent matters" value={stats.urgentOpen} icon={Flag} tone={stats.urgentOpen ? "danger" : "neutral"} href="/cases?urgent=1" hint={`${stats.activeCases} open cases`} />
         <Stat
-          label="Fees outstanding"
-          value={formatINRCompact(stats.feesOutstanding)}
+          label="Fees overdue"
+          value={formatINRCompact(stats.overdue.overdueBalance)}
           icon={IndianRupee}
-          tone={stats.feesOutstanding ? "warning" : "success"}
-          href="/clients?sort=balance"
-          hint="Across all matters"
+          tone={stats.overdue.overdueBalance ? "danger" : "success"}
+          href="/dues?tab=overdue"
+          hint={
+            stats.overdue.overdueCount
+              ? `${stats.overdue.clientCount} clients · oldest ${stats.overdue.maxDaysOverdue} days`
+              : `${formatINRCompact(stats.feesOutstanding)} outstanding, none late`
+          }
         />
       </div>
 
@@ -246,6 +257,53 @@ export default function DashboardPage() {
 
         <div className="space-y-5">
           <Card>
+            <CardHeader
+              icon={<IndianRupee />}
+              title="Collect"
+              description={collect.length ? `${formatINR(collect.reduce((s, i) => s + i.balance, 0))} due today and overdue` : "Nothing due today"}
+              divider
+              action={<Button asChild variant="ghost" size="xs"><Link href="/dues">All dues</Link></Button>}
+            />
+            {collect.length === 0 ? (
+              <div className="flex items-center justify-between gap-3 px-5 py-4">
+                <p className="text-[13px] text-muted-foreground">No fees fall due today.</p>
+                <Button size="xs" variant="outline" onClick={() => dues.recordPayment()}>Record payment</Button>
+              </div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {collect.slice(0, 5).map((i) => {
+                  const c = caseById.get(i.due.case_id)
+                  const cl = c ? clientById.get(c.client_id) : undefined
+                  return (
+                    <li key={i.due.id} className="px-5 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <button type="button" onClick={() => dues.openDues({ caseId: i.due.case_id })} className="min-w-0 text-left">
+                          <span className="block truncate text-[13px] font-medium text-foreground hover:text-primary">{cl?.full_name ?? "Client"}</span>
+                          <span className="block truncate text-xs text-muted-foreground">{i.due.description} · {c?.case_number}</span>
+                        </button>
+                        <span className="shrink-0 text-right">
+                          <span className="tabular block text-[13px] font-semibold text-foreground">{formatINR(i.balance)}</span>
+                          <span className={cn("block text-xs", i.status === "Overdue" ? "text-danger-soft-foreground" : "text-warning-soft-foreground")}>
+                            {i.status === "Overdue" ? `${i.daysOverdue}d late` : "Today"}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="mt-2">
+                        <DueActions info={i} client={cl} caseData={c} />
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+            {collect.length > 5 && (
+              <Link href="/dues?tab=overdue" className="block border-t border-border px-5 py-2.5 text-center text-[13px] font-medium text-primary hover:bg-surface-2">
+                {collect.length - 5} more
+              </Link>
+            )}
+          </Card>
+
+          <Card>
             <CardHeader icon={<AlarmClock />} title="Deadlines" description="Filing, compliance and limitation" divider />
             {deadlines.length === 0 ? (
               <EmptyState compact icon={AlarmClock} title="No deadlines" />
@@ -297,32 +355,6 @@ export default function DashboardPage() {
             </div>
           </Card>
 
-          <Card className="overflow-hidden">
-            <div className="border-b border-border bg-primary-soft/60 px-5 py-4">
-              <div className="flex items-center gap-2">
-                <Sparkles className="size-4 text-primary" />
-                <p className="text-[15px] font-semibold text-foreground">Ask LexAI</p>
-              </div>
-              <p className="mt-1 text-[13px] text-muted-foreground">Drafting and research help. Always verify before filing.</p>
-            </div>
-            <div className="space-y-1 p-2">
-              {[
-                "Prepare me for tomorrow's hearings",
-                "Draft a client update in Hindi",
-                "Grounds for NDPS bail under Section 37",
-              ].map((p) => (
-                <Link
-                  key={p}
-                  href={`/ai-assistant?prompt=${encodeURIComponent(p)}`}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-foreground transition-colors hover:bg-surface-2"
-                >
-                  <Bot className="size-4 shrink-0 text-subtle-foreground" />
-                  <span className="flex-1">{p}</span>
-                  <ArrowRight className="size-3.5 text-subtle-foreground" />
-                </Link>
-              ))}
-            </div>
-          </Card>
         </div>
       </div>
 

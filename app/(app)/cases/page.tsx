@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Briefcase, Columns3, Ellipsis, Eye, Flag, List, Plus, Trash2 } from "lucide-react"
+import { Briefcase, CalendarPlus, Columns3, Ellipsis, Eye, Flag, IndianRupee, List, Plus, Trash2, TriangleAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { CaseTypeTag, StatusBadge, UrgentBadge } from "@/components/ui/badge"
@@ -12,15 +12,17 @@ import { Dropdown, DropdownContent, DropdownItem, DropdownSeparator, DropdownTri
 import { useConfirmDialog } from "@/components/ui/confirm-dialog"
 import { useToast } from "@/components/ui/toast"
 import { CASE_STATUSES, CASE_TYPES, OPEN_STATUSES, caseStatusTone, toneSolid } from "@/lib/constants"
-import { cn, formatDate, getDaysUntil, getRelativeDayLabel } from "@/lib/utils"
-import { deleteCase, getNextHearing, useDB, type Case } from "@/lib/store"
+import { cn, formatDate, formatINR, getDaysUntil, getRelativeDayLabel } from "@/lib/utils"
+import { deleteCase, getCaseDueInfos, getNextHearing, summariseDues, useDB, type Case } from "@/lib/store"
+import { useDues } from "@/components/dues/dues-context"
+import { DuesCell } from "@/components/dues/due-badge"
 
 const PER_PAGE = 15
 type Sort = "next" | "recent" | "number"
 
 function readParams() {
   const p = new URLSearchParams(window.location.search)
-  return { status: p.get("status") ?? "Open", urgent: p.get("urgent") === "1" }
+  return { status: p.get("status") ?? "Open", urgent: p.get("urgent") === "1", overdue: p.get("overdue") === "1" }
 }
 
 export default function CasesPage() {
@@ -35,6 +37,8 @@ export default function CasesPage() {
   const [type, setType] = useState("All")
   const [status, setStatus] = useState(initial.status)
   const [urgentOnly, setUrgentOnly] = useState(initial.urgent)
+  const [overdueOnly, setOverdueOnly] = useState(initial.overdue)
+  const dues = useDues()
   const [sort, setSort] = useState<Sort>("next")
   const [page, setPage] = useState(1)
 
@@ -44,6 +48,12 @@ export default function CasesPage() {
     db.cases.forEach((c) => m.set(c.id, getNextHearing(c.id, db.hearings)))
     return m
   }, [db.cases, db.hearings])
+
+  const duesById = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof summariseDues>>()
+    db.cases.forEach((c) => m.set(c.id, summariseDues(getCaseDueInfos(c.id, db))))
+    return m
+  }, [db])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -55,9 +65,11 @@ export default function CasesPage() {
       const matchType = type === "All" || c.case_type === type
       const matchStatus = status === "All" || (status === "Open" ? OPEN_STATUSES.includes(c.status) : c.status === status)
       const matchUrgent = !urgentOnly || c.priority === "Urgent"
-      return matchSearch && matchType && matchStatus && matchUrgent
+      const matchOverdue = !overdueOnly || (duesById.get(c.id)?.overdueCount ?? 0) > 0
+      return matchSearch && matchType && matchStatus && matchUrgent && matchOverdue
     })
     return list.sort((a, b) => {
+      if (overdueOnly) return (duesById.get(b.id)?.maxDaysOverdue ?? 0) - (duesById.get(a.id)?.maxDaysOverdue ?? 0)
       if (sort === "number") return a.case_number.localeCompare(b.case_number)
       if (sort === "recent") return b.filing_date.localeCompare(a.filing_date)
       const na = nextById.get(a.id)?.date
@@ -67,7 +79,7 @@ export default function CasesPage() {
       if (nb) return 1
       return b.filing_date.localeCompare(a.filing_date)
     })
-  }, [db.cases, search, type, status, urgentOnly, sort, clientById, nextById])
+  }, [db.cases, search, type, status, urgentOnly, overdueOnly, sort, clientById, nextById, duesById])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
   const current = Math.min(page, totalPages)
@@ -75,13 +87,15 @@ export default function CasesPage() {
 
   const openCount = db.cases.filter((c) => OPEN_STATUSES.includes(c.status)).length
   const urgentCount = db.cases.filter((c) => OPEN_STATUSES.includes(c.status) && c.priority === "Urgent").length
-  const hasFilters = search || type !== "All" || status !== "Open" || urgentOnly
+  const hasFilters = search || type !== "All" || status !== "Open" || urgentOnly || overdueOnly
+  const overdueCases = db.cases.filter((c) => (duesById.get(c.id)?.overdueCount ?? 0) > 0).length
 
   const resetFilters = () => {
     setSearch("")
     setType("All")
     setStatus("Open")
     setUrgentOnly(false)
+    setOverdueOnly(false)
     setPage(1)
   }
 
@@ -106,6 +120,8 @@ export default function CasesPage() {
       </DropdownTrigger>
       <DropdownContent className="w-44">
         <DropdownItem onSelect={() => router.push(`/cases/${c.id}`)}><Eye /> Open case</DropdownItem>
+        <DropdownItem onSelect={() => dues.recordPayment({ caseId: c.id })}><IndianRupee /> Record payment</DropdownItem>
+        <DropdownItem onSelect={() => dues.addDue({ caseId: c.id })}><CalendarPlus /> Add fee due</DropdownItem>
         <DropdownSeparator />
         <DropdownItem onSelect={() => handleDelete(c)} className="text-danger-soft-foreground [&_svg]:text-danger">
           <Trash2 /> Delete
@@ -181,6 +197,14 @@ export default function CasesPage() {
           <span className="mx-1 hidden w-px self-stretch bg-border sm:block" />
           <Chip active={urgentOnly} onClick={() => { setUrgentOnly(!urgentOnly); setPage(1) }}>
             <Flag /> Urgent only
+          </Chip>
+          <Chip
+            active={overdueOnly}
+            onClick={() => { setOverdueOnly(!overdueOnly); setPage(1) }}
+            count={overdueCases}
+            className={overdueCases && !overdueOnly ? "border-danger/30 text-danger-soft-foreground" : undefined}
+          >
+            <TriangleAlert /> Fees overdue
           </Chip>
           {hasFilters && (
             <button type="button" onClick={resetFilters} className="shrink-0 px-2 text-[13px] font-medium text-primary hover:underline">
@@ -258,6 +282,7 @@ export default function CasesPage() {
                       <th scope="col" className="px-5 py-2.5 font-medium">Matter</th>
                       <th scope="col" className="px-4 py-2.5 font-medium">Court</th>
                       <th scope="col" className="px-4 py-2.5 font-medium">Next date</th>
+                      <th scope="col" className="px-4 py-2.5 font-medium">Fees</th>
                       <th scope="col" className="px-4 py-2.5 font-medium">Status</th>
                       <th scope="col" className="w-12 px-3 py-2.5"><span className="sr-only">Actions</span></th>
                     </tr>
@@ -291,6 +316,9 @@ export default function CasesPage() {
                             <p className="truncate text-xs text-subtle-foreground">{c.judge}</p>
                           </td>
                           <td className="px-4 py-3">{nextDateCell(c)}</td>
+                          <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
+                            <DuesCell summary={duesById.get(c.id)!} onOpen={() => dues.openDues({ caseId: c.id })} />
+                          </td>
                           <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
                           <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>{rowMenu(c)}</td>
                         </tr>
@@ -323,6 +351,17 @@ export default function CasesPage() {
                           </p>
                         )}
                       </Link>
+                      {(duesById.get(c.id)?.overdueCount ?? 0) > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => dues.openDues({ caseId: c.id })}
+                          className="mx-4 mb-3 -mt-1 flex w-[calc(100%-2rem)] items-center gap-2 rounded-lg bg-danger-soft px-3 py-2 text-left text-xs font-medium text-danger-soft-foreground"
+                        >
+                          <TriangleAlert className="size-3.5" />
+                          {formatINR(duesById.get(c.id)!.overdueBalance)} overdue · {duesById.get(c.id)!.maxDaysOverdue} days
+                          <span className="ml-auto underline">Settle</span>
+                        </button>
+                      )}
                     </li>
                   )
                 })}

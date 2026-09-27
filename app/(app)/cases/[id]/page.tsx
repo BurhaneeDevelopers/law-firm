@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   AlarmClock, Briefcase, CalendarDays, CalendarPlus, Check, Copy, Download, Ellipsis, ExternalLink, FileText, Gavel,
-  NotebookPen, Pencil, Phone, Pin, PinOff, Plus, ScrollText, Sparkles, Trash2, Upload,
+  IndianRupee, NotebookPen, Pencil, Phone, Pin, PinOff, Plus, ScrollText, Trash2, Upload,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, DetailRow } from "@/components/ui/card"
@@ -19,18 +19,18 @@ import { RecordOutcomeSheet } from "@/components/practice/record-outcome-sheet"
 import { AddHearingDialog } from "@/components/practice/add-hearing-dialog"
 import { UploadDialog } from "@/components/practice/upload-dialog"
 import { WhatsAppMenu } from "@/components/practice/whatsapp-menu"
-import { AIText } from "@/components/practice/ai-text"
 import { purposeTone } from "@/lib/constants"
 import {
   cn, formatDate, formatINR, formatRelativeTime, formatTime, getDaysUntil, hearingReminderMessage, todayISO,
 } from "@/lib/utils"
 import {
   addDeadline, addNote, deleteCase, deleteDeadline, deleteDocument, deleteHearing, deleteNote, getCaseFees, getNextHearing,
-  sortHearings, uid, updateNote, useDB, type Hearing,
+  getCaseDueInfos, sortHearings, summariseDues, uid, updateNote, useDB, type Hearing,
 } from "@/lib/store"
-import { callGemini } from "@/lib/gemini"
 import { CaseEditSheet } from "./case-edit-sheet"
 import { CaseFees } from "./case-fees"
+import { useDues } from "@/components/dues/dues-context"
+import { OverdueBanner } from "@/components/dues/overdue-banner"
 
 export default function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
@@ -39,15 +39,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const { toast } = useToast()
   const { confirm, dialogElement } = useConfirmDialog()
 
-  const [tab, setTab] = useState("overview")
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get("tab") ?? "overview")
+  const dues = useDues()
   const [editOpen, setEditOpen] = useState(false)
   const [outcomeFor, setOutcomeFor] = useState<Hearing | null>(null)
   const [hearingOpen, setHearingOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [newNote, setNewNote] = useState("")
   const [deadline, setDeadline] = useState({ title: "", due_date: "" })
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiSummary, setAiSummary] = useState("")
   const [copied, setCopied] = useState(false)
 
   const caseData = db.cases.find((c) => c.id === id)
@@ -74,6 +73,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const notices = db.notices.filter((n) => n.case_id === id)
   const deadlines = db.deadlines.filter((d) => d.case_id === id).sort((a, b) => a.due_date.localeCompare(b.due_date))
   const fees = getCaseFees(id, db)
+  const dueSummary = summariseDues(getCaseDueInfos(id, db))
 
   const copyCnr = async () => {
     try {
@@ -101,27 +101,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     addDeadline({ id: uid("dl"), case_id: id, title: deadline.title.trim(), due_date: deadline.due_date, case_number: caseData.case_number, client: client?.full_name ?? "" })
     setDeadline({ title: "", due_date: "" })
     toast("Deadline added", "success")
-  }
-
-  const handleAISummary = async () => {
-    setAiLoading(true)
-    const prompt = `Summarise this case for Advocate ${db.lawyer.name}:
-Case: ${caseData.title}
-Number: ${caseData.case_number}${caseData.cnr_number ? ` (CNR ${caseData.cnr_number})` : ""}
-Type: ${caseData.case_type}
-Court: ${caseData.court}, ${caseData.judge}
-Status: ${caseData.status}
-Opposite party: ${caseData.opposing_party}
-Filed: ${caseData.filing_date}
-Facts: ${caseData.description}
-Past hearings: ${past.map((h) => `${h.date} ${h.purpose}${h.outcome ? ` (${h.outcome}: ${h.outcome_notes})` : ""}`).join("; ") || "none"}
-Next date: ${nextHearing ? `${nextHearing.date} for ${nextHearing.purpose}` : "not listed"}
-Notes: ${notes.map((n) => n.content).join("; ") || "none"}
-
-Give: Case overview, Key dates, Current stage, Risk flags, Suggested next steps.`
-    const result = await callGemini(prompt)
-    setAiSummary(result)
-    setAiLoading(false)
   }
 
   const reminder = (h: Hearing) => (lang: "English" | "Hindi") =>
@@ -212,7 +191,6 @@ Give: Case overview, Key dates, Current stage, Risk flags, Suggested next steps.
               <DropdownContent className="w-52">
                 <DropdownItem onSelect={() => setUploadOpen(true)}><Upload /> Upload document</DropdownItem>
                 <DropdownItem onSelect={() => router.push(`/notices/new?case=${id}`)}><ScrollText /> Draft notice</DropdownItem>
-                <DropdownItem onSelect={() => { setTab("ai"); if (!aiSummary) handleAISummary() }}><Sparkles /> AI summary</DropdownItem>
                 <DropdownSeparator />
                 <DropdownItem
                   className="text-danger-soft-foreground [&_svg]:text-danger"
@@ -232,6 +210,17 @@ Give: Case overview, Key dates, Current stage, Risk flags, Suggested next steps.
         }
       />
 
+      {dueSummary.overdueCount > 0 && dueSummary.oldestOverdue && (
+        <OverdueBanner
+          amount={dueSummary.overdueBalance}
+          days={dueSummary.maxDaysOverdue}
+          label={dueSummary.overdueCount > 1 ? `${dueSummary.overdueCount} dues` : dueSummary.oldestOverdue.due.description}
+          onMarkPaid={dueSummary.overdueCount === 1 ? () => dues.markPaid(dueSummary.oldestOverdue!.due.id) : undefined}
+          onRecord={() => dues.recordPayment({ caseId: id })}
+          onView={() => setTab("fees")}
+        />
+      )}
+
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
         <Card className="min-w-0 overflow-hidden">
           <Tabs value={tab} onValueChange={setTab}>
@@ -240,9 +229,8 @@ Give: Case overview, Key dates, Current stage, Risk flags, Suggested next steps.
               <TabsTrigger value="hearings" count={hearings.length}>Hearings</TabsTrigger>
               <TabsTrigger value="documents" count={documents.length}>Documents</TabsTrigger>
               <TabsTrigger value="notes" count={notes.length}>Notes</TabsTrigger>
-              <TabsTrigger value="fees">Fees</TabsTrigger>
+              <TabsTrigger value="fees" count={dueSummary.openCount || undefined} className={dueSummary.overdueCount ? "[&>span]:bg-danger-soft! [&>span]:text-danger-soft-foreground!" : undefined}>Fees</TabsTrigger>
               <TabsTrigger value="notices" count={notices.length}>Notices</TabsTrigger>
-              <TabsTrigger value="ai"><Sparkles className="size-3.5" /> AI summary</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-6 p-5">
@@ -390,7 +378,7 @@ Give: Case overview, Key dates, Current stage, Risk flags, Suggested next steps.
             </TabsContent>
 
             <TabsContent value="fees" className="p-5">
-              <CaseFees caseData={caseData} client={client} />
+              <CaseFees caseData={caseData} />
             </TabsContent>
 
             <TabsContent value="notices" className="p-5">
@@ -416,25 +404,6 @@ Give: Case overview, Key dates, Current stage, Risk flags, Suggested next steps.
               )}
             </TabsContent>
 
-            <TabsContent value="ai" className="p-5">
-              {!aiSummary ? (
-                <EmptyState
-                  icon={Sparkles}
-                  title="Brief me on this case"
-                  description="Overview, key dates, current stage, risk flags and next steps from the record above."
-                  action={<Button onClick={handleAISummary} loading={aiLoading}>{!aiLoading && <Sparkles />} {aiLoading ? "Reading the file" : "Generate summary"}</Button>}
-                />
-              ) : (
-                <div className="space-y-4">
-                  <AIText content={aiSummary} />
-                  <div className="flex gap-2 border-t border-border pt-4">
-                    <Button size="sm" variant="outline" onClick={handleAISummary} loading={aiLoading}>Regenerate</Button>
-                    <Button size="sm" variant="ghost" onClick={() => { navigator.clipboard.writeText(aiSummary); toast("Copied", "success") }}><Copy /> Copy</Button>
-                  </div>
-                  <p className="text-xs text-subtle-foreground">AI output is for your review. Verify against the record before relying on it.</p>
-                </div>
-              )}
-            </TabsContent>
           </Tabs>
         </Card>
 
@@ -491,14 +460,24 @@ Give: Case overview, Key dates, Current stage, Risk flags, Suggested next steps.
           )}
 
           <Card>
-            <CardHeader title="Fees" action={<Button variant="ghost" size="xs" onClick={() => setTab("fees")}>Ledger</Button>} />
-            <dl className="px-5 pb-4">
+            <CardHeader title="Fees" action={<Button variant="ghost" size="xs" onClick={() => setTab("fees")}>Schedule</Button>} />
+            <dl className="px-5 pt-1">
               <DetailRow label="Agreed">{formatINR(fees.agreed)}</DetailRow>
-              <DetailRow label="Received">{formatINR(fees.received)}</DetailRow>
-              <DetailRow label="Balance">
-                <span className={fees.balance > 0 ? "text-warning-soft-foreground" : "text-success-soft-foreground"}>{formatINR(fees.balance)}</span>
+              <DetailRow label="Received"><span className="text-success-soft-foreground">{formatINR(fees.received)}</span></DetailRow>
+              <DetailRow label="Overdue">
+                <span className={dueSummary.overdueBalance ? "text-danger-soft-foreground" : "text-foreground"}>
+                  {formatINR(dueSummary.overdueBalance)}
+                  {dueSummary.maxDaysOverdue > 0 && <span className="font-normal"> · {dueSummary.maxDaysOverdue}d</span>}
+                </span>
+              </DetailRow>
+              <DetailRow label="Next due">
+                {dueSummary.next ? `${formatINR(dueSummary.next.balance)} · ${formatDate(dueSummary.next.due.due_date, "dd MMM")}` : "None scheduled"}
               </DetailRow>
             </dl>
+            <div className="grid grid-cols-2 gap-2 px-5 pb-5 pt-2">
+              <Button size="sm" variant="outline" onClick={() => dues.addDue({ caseId: id })}><CalendarPlus /> Add due</Button>
+              <Button size="sm" onClick={() => dues.recordPayment({ caseId: id })}><IndianRupee /> Payment</Button>
+            </div>
           </Card>
         </aside>
       </div>
