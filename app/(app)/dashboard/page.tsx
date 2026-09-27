@@ -29,7 +29,7 @@ function greeting() {
   return "Good evening"
 }
 
-const BANNER_KEY = "lexfirm-citation-banner-dismissed"
+const BANNER_KEY = "vakilos-citation-banner-dismissed"
 
 export default function DashboardPage() {
   const db = useDB()

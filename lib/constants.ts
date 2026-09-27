@@ -1,6 +1,6 @@
 // App-wide constants. Pages and components import from here instead of hardcoding lists.
 
-export const APP_NAME = "LexFirm"
+export const APP_NAME = "VakilOS"
 export const APP_TAGLINE = "Practice management for Indian advocates"
 
 export const DEVELOPER_CREDIT = {

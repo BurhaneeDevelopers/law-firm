@@ -16,8 +16,8 @@ type ThemeContextValue = {
   toggleTheme: () => void
 }
 
-export const THEME_STORAGE_KEY = "lexfirm-theme"
-export const SIDEBAR_STORAGE_KEY = "lexfirm-sidebar-collapsed"
+export const THEME_STORAGE_KEY = "vakilos-theme"
+export const SIDEBAR_STORAGE_KEY = "vakilos-sidebar-collapsed"
 
 /**
  * Runs in <head> before first paint so the page never flashes the wrong theme

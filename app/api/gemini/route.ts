@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { GoogleGenerativeAI } from "@google/generative-ai"
 
 function getLegalAssistantSystem() {
-  return `You are a professional AI legal assistant working for an Indian law firm. Your name is LexAI.
+  return `You are a professional AI legal assistant working for an Indian law firm. Your name is VakilOS AI.
 
 PERSONALITY:
 - Professional, formal, and concise — like a senior legal clerk
@@ -42,7 +42,7 @@ function getDemoAIResponse(prompt: string): string {
     return `**Client update message (English and Hindi)**\n\nSuggested bilingual client communication is ready for your review. Please personalize dates and case details.`
   }
 
-  return `**LexAI Response**\n\nI can help with case summaries, notice drafts, hearing prep, and client communications. Share your case context and requested output format.`
+  return `**VakilOS AI Response**\n\nI can help with case summaries, notice drafts, hearing prep, and client communications. Share your case context and requested output format.`
 }
 
 export async function POST(request: Request) {

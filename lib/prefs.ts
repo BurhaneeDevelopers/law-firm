@@ -2,7 +2,7 @@
 import { useCallback, useMemo } from "react"
 import { useStoredValue, writeStored } from "./use-stored-value"
 
-export const ALERT_PREFS_KEY = "lexfirm-alert-prefs"
+export const ALERT_PREFS_KEY = "vakilos-alert-prefs"
 
 export type AlertPrefs = {
   /** Where payment alerts are emailed. Usually the advocate or the accounts clerk. */

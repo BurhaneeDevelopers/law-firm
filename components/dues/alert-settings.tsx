@@ -78,7 +78,7 @@ export function AlertSettings({ fallbackEmail }: { fallbackEmail: string }) {
     setPermission(p)
     if (p === "granted") {
       set({ desktopAlerts: true })
-      new Notification("LexFirm alerts are on", { body: "You will get one alert a day when fees are due." })
+      new Notification("VakilOS alerts are on", { body: "You will get one alert a day when fees are due." })
     } else {
       toast("Notifications are blocked. Allow them in the browser's site settings.", "warning")
     }

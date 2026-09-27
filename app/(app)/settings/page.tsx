@@ -24,9 +24,9 @@ const SECTIONS = [
 type Section = (typeof SECTIONS)[number]["id"]
 
 const initialTeam = [
-  { id: 1, name: "Rahul Yadav", email: "rahul.yadav@lexfirm.in", role: "Associate", status: "Active" },
-  { id: 2, name: "Priya Sharma", email: "priya.sharma@lexfirm.in", role: "Clerk", status: "Active" },
-  { id: 3, name: "Vikash Kumar", email: "vikash.kumar@lexfirm.in", role: "Associate", status: "Invited" },
+  { id: 1, name: "Rahul Yadav", email: "rahul.yadav@vakilos.in", role: "Associate", status: "Active" },
+  { id: 2, name: "Priya Sharma", email: "priya.sharma@vakilos.in", role: "Clerk", status: "Active" },
+  { id: 3, name: "Vikash Kumar", email: "vikash.kumar@vakilos.in", role: "Associate", status: "Invited" },
 ]
 
 const permissions = [

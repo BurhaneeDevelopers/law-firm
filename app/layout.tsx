@@ -13,9 +13,9 @@ const devanagari = Noto_Sans_Devanagari({ subsets: ["devanagari"], weight: ["400
 const documentSerif = Source_Serif_4({ subsets: ["latin"], variable: "--font-document", display: "swap" })
 
 export const metadata: Metadata = {
-  title: { default: "LexFirm", template: "%s · LexFirm" },
-  description: "Practice management for Indian advocates: court diary, cases, clients, fees, notices and AI drafting.",
-  applicationName: "LexFirm",
+  title: { default: "VakilOS", template: "%s · VakilOS" },
+  description: "Practice management for Indian advocates: court diary, cases, clients, fees and dues, legal notices and AI citation check.",
+  applicationName: "VakilOS",
 }
 
 export const viewport: Viewport = {

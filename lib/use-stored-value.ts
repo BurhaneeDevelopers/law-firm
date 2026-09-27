@@ -1,7 +1,7 @@
 "use client"
 import { useCallback, useSyncExternalStore } from "react"
 
-const EVENT = "lexfirm-storage"
+const EVENT = "vakilos-storage"
 
 function read(key: string) {
   try {

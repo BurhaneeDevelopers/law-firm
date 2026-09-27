@@ -44,7 +44,7 @@ export function Header() {
   }, [])
 
   const segments = pathname.split("/").filter(Boolean)
-  const section = pageTitles[segments[0]] ?? "LexFirm"
+  const section = pageTitles[segments[0]] ?? "VakilOS"
   const ThemeIcon = theme === "dark" ? Moon : Sun
 
   return (

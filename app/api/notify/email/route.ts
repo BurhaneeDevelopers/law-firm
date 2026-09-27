@@ -4,7 +4,7 @@ import { NextResponse } from "next/server"
 //
 // Env:
 //   RESEND_API_KEY  required to actually send
-//   EMAIL_FROM      verified sender, e.g. "LexFirm <alerts@yourfirm.in>"
+//   EMAIL_FROM      verified sender, e.g. "VakilOS <alerts@yourfirm.in>"
 //   ADMIN_EMAIL     when set, mail can only go to this address. Set it in production:
 //                   the app has no login yet, so an open route could be abused as a relay.
 
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || "LexFirm <onboarding@resend.dev>",
+        from: process.env.EMAIL_FROM || "VakilOS <onboarding@resend.dev>",
         to: [to],
         subject,
         html: body.html,

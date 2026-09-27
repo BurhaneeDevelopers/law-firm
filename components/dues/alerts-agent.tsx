@@ -7,7 +7,7 @@ import { collectDigestRows, DIGEST_STATUS_KEY, sendDigest, type DigestStatus } f
 import { formatINR, todayISO } from "@/lib/utils"
 import { getDB } from "@/lib/store"
 
-const DESKTOP_KEY = "lexfirm-desktop-alert-date"
+const DESKTOP_KEY = "vakilos-desktop-alert-date"
 
 /**
  * Runs once per day when the app opens:
@@ -49,7 +49,7 @@ export function AlertsAgent() {
         const overdue = rows.filter((r) => r.info.status === "Overdue").length
         new Notification(`Fees to collect: ${formatINR(total)}`, {
           body: `${rows.length - overdue} due today, ${overdue} overdue. Open Dues to follow up.`,
-          tag: "lexfirm-dues",
+          tag: "vakilos-dues",
         })
         localStorage.setItem(DESKTOP_KEY, today)
       }

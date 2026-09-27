@@ -93,7 +93,7 @@ function Brand({ collapsed, firm }: { collapsed?: boolean; firm: string }) {
       {!collapsed && (
         <span className="min-w-0">
           <span className="block truncate text-sm font-semibold leading-tight text-foreground">{firm}</span>
-          <span className="block text-xs text-subtle-foreground">LexFirm</span>
+          <span className="block text-xs text-subtle-foreground">VakilOS</span>
         </span>
       )}
     </Link>

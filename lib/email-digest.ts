@@ -4,7 +4,7 @@ import { getDueInfos, isOpenDue, type DB, type DueInfo } from "./store"
 import type { AlertPrefs } from "./prefs"
 import { writeStored } from "./use-stored-value"
 
-export const DIGEST_STATUS_KEY = "lexfirm-digest-status"
+export const DIGEST_STATUS_KEY = "vakilos-digest-status"
 
 export type DigestStatus = { date: string; sent: boolean; reason?: string; count: number; at: string }
 
@@ -78,7 +78,7 @@ export function buildDigestEmail(rows: DigestRow[], firmName: string, appUrl: st
         ${section("Overdue", overdue)}
         <p style="margin:24px 0 0"><a href="${esc(appUrl)}/dues" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 16px;border-radius:10px;font-size:14px">Open Dues</a></p>
       </div>
-      <p style="color:#6b7088;font-size:11px;text-align:center;margin-top:16px">Sent by LexFirm. Change this in Settings, Alerts and email.</p>
+      <p style="color:#6b7088;font-size:11px;text-align:center;margin-top:16px">Sent by VakilOS. Change this in Settings, Alerts and email.</p>
     </div></body></html>`
 
   return { subject, text, html, total }
@@ -93,7 +93,7 @@ export async function sendDigest(db: DB, prefs: AlertPrefs, opts: { force?: bool
   const email = rows.length
     ? buildDigestEmail(rows, db.lawyer.firm_name, window.location.origin)
     : {
-        subject: "LexFirm test email: payment alerts are working",
+        subject: "VakilOS test email: payment alerts are working",
         text: "No fees are due today or overdue. You will get a daily email when there are.",
         html: "<p>No fees are due today or overdue. You will get a daily email when there are.</p>",
       }
