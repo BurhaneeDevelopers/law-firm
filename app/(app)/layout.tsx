@@ -1,6 +1,5 @@
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
-import { Watermark } from "@/components/layout/watermark"
 import { PageFrame } from "@/components/layout/page-frame"
 import { DuesProvider } from "@/components/dues/dues-provider"
 import { AlertsAgent } from "@/components/dues/alerts-agent"
@@ -22,7 +21,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <PageFrame>{children}</PageFrame>
           </main>
         </div>
-        <Watermark />
         <AlertsAgent />
       </div>
     </DuesProvider>

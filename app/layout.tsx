@@ -4,6 +4,7 @@ import "./globals.css"
 import { ToastProvider } from "@/components/ui/toast"
 import { themeInitScript } from "@/lib/theme"
 import { Providers } from "./providers"
+import { Watermark } from "@/components/layout/watermark"
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist", display: "swap" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono", display: "swap" })
@@ -38,6 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-dvh">
         <Providers>
           <ToastProvider>{children}</ToastProvider>
+          <Watermark />
         </Providers>
       </body>
     </html>

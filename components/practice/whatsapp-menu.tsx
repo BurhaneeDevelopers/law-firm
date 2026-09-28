@@ -1,5 +1,5 @@
 "use client"
-import { MessageCircle } from "lucide-react"
+import { WhatsAppIcon } from "@/components/ui/brand-icons"
 import { Button, type ButtonProps } from "@/components/ui/button"
 import { Dropdown, DropdownContent, DropdownItem, DropdownLabel, DropdownTrigger } from "@/components/ui/dropdown"
 import { whatsappLink } from "@/lib/utils"
@@ -33,7 +33,7 @@ export function WhatsAppMenu({ phone, message, preferred = "English", label = "W
     <Dropdown>
       <DropdownTrigger asChild>
         <Button size={size} variant={variant} className={className} aria-label={label === "" ? "Send on WhatsApp" : undefined}>
-          <MessageCircle />
+          <WhatsAppIcon className={variant === "whatsapp" ? undefined : "text-whatsapp"} />
           {label}
         </Button>
       </DropdownTrigger>

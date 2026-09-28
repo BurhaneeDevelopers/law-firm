@@ -120,14 +120,12 @@ function UserCard({ collapsed, name, title, onNavigate }: { collapsed?: boolean;
 
 function Credit({ className }: { className?: string }) {
   return (
-    <a
-      href={DEVELOPER_CREDIT.href}
-      target="_blank"
-      rel="noreferrer"
-      className={cn("block text-center text-[11px] font-medium text-subtle-foreground transition-colors hover:text-primary", className)}
-    >
-      Built by {DEVELOPER_CREDIT.label}
-    </a>
+    <p className={cn("text-center text-[11px] font-medium text-subtle-foreground", className)}>
+      Crafted with <span role="img" aria-label="love">❤️</span> by{" "}
+      <a href={DEVELOPER_CREDIT.href} target="_blank" rel="noreferrer" className="font-semibold text-foreground hover:text-primary hover:underline">
+        {DEVELOPER_CREDIT.label}
+      </a>
+    </p>
   )
 }
 
